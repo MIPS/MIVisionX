@@ -1,6 +1,6 @@
 # MIPS port of OpenVX
 
-MIPS port of OpenVX ([mips](amd_openvx/mips)) implements <a href="https://www.khronos.org/openvx/" target="_blank">Khronos OpenVX</a> computer vision specification and is based on AMD OpenVX ([amd_openvx](amd_openvx#amd-openvx-amd_openvx)).
+MIPS port of OpenVX ([mips](amd_openvx/openvx/mips)) implements <a href="https://www.khronos.org/openvx/" target="_blank">Khronos OpenVX</a> computer vision specification and is based on AMD OpenVX ([amd_openvx](amd_openvx#amd-openvx-amd_openvx)).
 MIPS port is reusing AMD's ago_drama framework for graph optimization and is using MIPS SIMD Architecture ([MSA](https://www.mips.com/products/architectures/ase/simd/)) for optimization of vision functions.
 
 
