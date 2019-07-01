@@ -35,6 +35,9 @@ THE SOFTWARE.
 bool agoIsCpuHardwareSupported()
 {
 	bool isHardwareSupported = false;
+#if BUILD_MIPS
+        return true;
+#else
 	int CPUInfo[4] = { -1 };
 	__cpuid(CPUInfo, 0);
 	if (CPUInfo[0] > 1) {
@@ -44,6 +47,7 @@ bool agoIsCpuHardwareSupported()
 			isHardwareSupported = true;
 	}
 	return isHardwareSupported;
+#endif
 }
 
 uint32_t agoControlFpSetRoundEven()

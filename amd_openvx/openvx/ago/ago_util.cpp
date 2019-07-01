@@ -917,7 +917,7 @@ int agoParseWordFromDescription(const char *& desc, vx_size size, char * word)
 	*word = 0;
 	return 0;
 }
-
+#if (__SIZEOF_SIZE_T__ != __SIZEOF_INT__)
 int agoParseValueFromDescription(const char *& desc, vx_uint32& value)
 {
 	char word[32];
@@ -926,6 +926,7 @@ int agoParseValueFromDescription(const char *& desc, vx_uint32& value)
 	value = atoi(word);
 	return 0;
 }
+#endif
 
 int agoParseValueFromDescription(const char *& desc, vx_size& value)
 {

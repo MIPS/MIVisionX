@@ -34,24 +34,6 @@ list(APPEND SOURCES
 	ago/ago_drama_divide.cpp
 	ago/ago_drama_merge.cpp
 	ago/ago_drama_remove.cpp
-	ago/ago_haf_cpu.cpp
-	ago/ago_haf_cpu_arithmetic.cpp
-	ago/ago_haf_cpu_canny.cpp
-	ago/ago_haf_cpu_ch_extract_combine.cpp
-	ago/ago_haf_cpu_color_convert.cpp
-	ago/ago_haf_cpu_fast_corners.cpp
-	ago/ago_haf_cpu_filter.cpp
-	ago/ago_haf_cpu_geometric.cpp
-	ago/ago_haf_cpu_harris.cpp
-	ago/ago_haf_cpu_histogram.cpp
-	ago/ago_haf_cpu_logical.cpp
-	ago/ago_haf_cpu_opticalflow.cpp
-	ago/ago_haf_cpu_pyramid.cpp
-	ago/ago_haf_gpu_common.cpp
-	ago/ago_haf_gpu_conversion.cpp
-	ago/ago_haf_gpu_corners.cpp
-	ago/ago_haf_gpu_linear_filter.cpp
-	ago/ago_haf_gpu_special_filters.cpp
 	ago/ago_interface.cpp
 	ago/ago_kernel_api.cpp
 	ago/ago_kernel_list.cpp
@@ -61,9 +43,51 @@ list(APPEND SOURCES
 	api/vxu.cpp
 	api/vx_api.cpp
 	api/vx_nodes.cpp
+	api/vx_nodes_1_2.cpp
 )
 
+if (BUILD_MIPS OR C_IMPL)
+	list(APPEND SOURCES
+		mips/mips_cpu_dummy.cpp
+		mips/mips_cpu_arithmetic.cpp
+		mips/mips_cpu_logical.cpp
+		mips/mips_cpu_canny.cpp
+		mips/mips_cpu_ch_extract_combine.cpp
+		mips/mips_cpu_color_convert.cpp
+		ago/ago_haf_cpu_harris.cpp
+		mips/mips_cpu_opticalflow.cpp
+		mips/mips_cpu_pyramid.cpp
+		mips/mips_cpu_filter.cpp
+		mips/mips_cpu_geometric.cpp
+	)
+else (BUILD_MIPS OR C_IMPL)
+	list(APPEND SOURCES
+		ago/ago_haf_cpu.cpp
+		ago/ago_haf_cpu_arithmetic.cpp
+		ago/ago_haf_cpu_canny.cpp
+		ago/ago_haf_cpu_ch_extract_combine.cpp
+		ago/ago_haf_cpu_color_convert.cpp
+		ago/ago_haf_cpu_fast_corners.cpp
+		ago/ago_haf_cpu_filter.cpp
+		ago/ago_haf_cpu_geometric.cpp
+		ago/ago_haf_cpu_harris.cpp
+		ago/ago_haf_cpu_histogram.cpp
+		ago/ago_haf_cpu_logical.cpp
+		ago/ago_haf_cpu_opticalflow.cpp
+		ago/ago_haf_cpu_pyramid.cpp
+		ago/ago_haf_gpu_common.cpp
+		ago/ago_haf_gpu_conversion.cpp
+		ago/ago_haf_gpu_corners.cpp
+		ago/ago_haf_gpu_linear_filter.cpp
+		ago/ago_haf_gpu_special_filters.cpp
+	)
+endif (BUILD_MIPS OR C_IMPL)
+
 add_library(openvx SHARED ${SOURCES})
+
+if(BUILD_MIPS)
+	target_compile_definitions(openvx PUBLIC BUILD_MIPS=1)
+endif(BUILD_MIPS)
 
 if (OpenCL_FOUND)
 	target_compile_definitions(openvx PUBLIC ENABLE_OPENCL=1)
@@ -97,11 +121,25 @@ install (FILES
 if( POLICY CMP0054 )
   cmake_policy( SET CMP0054 OLD )
 endif()
-if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
-	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD /DVX_API_ENTRY=__declspec(dllexport)")
-	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd /DVX_API_ENTRY=__declspec(dllexport)")
-else()
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse4.2 -std=c++11")
-	target_link_libraries(openvx dl m)
-endif()
 
+if(C_IMPL)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+	target_compile_definitions(openvx PUBLIC ENABLE_MSA=0)
+	target_compile_definitions(openvx PUBLIC ENABLE_SSE=0)
+	target_link_libraries(openvx dl m)
+else(C_IMPL)
+	if (BUILD_MIPS)
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mmsa -std=c++11")
+		target_compile_definitions(openvx PUBLIC ENABLE_MSA=1)
+		target_link_libraries(openvx dl m)
+	else (BUILD_MIPS)
+		if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+			set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MD /DVX_API_ENTRY=__declspec(dllexport)")
+			set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MDd /DVX_API_ENTRY=__declspec(dllexport)")
+		else()
+			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse4.2 -std=c++11")
+			target_compile_definitions(openvx PUBLIC ENABLE_SSE=1)
+			target_link_libraries(openvx dl m)
+		endif()
+	endif (BUILD_MIPS)
+endif(C_IMPL)

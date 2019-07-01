@@ -32,6 +32,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_INSTALL_PREFIX /opt/rocm/mivisionx)
 
+add_subdirectory(runvx)
 if(OpenCL_FOUND)
     add_subdirectory (runvx)
     add_subdirectory (runcl)

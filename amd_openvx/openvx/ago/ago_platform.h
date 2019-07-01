@@ -56,7 +56,9 @@ using namespace std;
 #include <intrin.h>
 #else
 #include <dlfcn.h>
+#if !BUILD_MIPS
 #include <x86intrin.h>
+#endif
 #if __APPLE__
 #include <cstdlib>
 #include <cmath>
