@@ -20,7 +20,10 @@ For purposes of testing and verification x86_64 build is used without OpenCL sup
 
 Build is performed natively on target platforms.
 For building OpenVX for mips64r6, [qemu](http://mips64el.bfsu.edu.cn/debian-new/tarball/) was used.
-For building OpenVX for mips32r5, <a href="http://tadviser.com/index.php/Product:ELISE_Semantic_processor_(ELVEES_Image_Semantic_Engine)" target="_blank">ELVEESE</a> platform was used.
+For building OpenVX for mips32r5, <a href="http://tadviser.com/index.php/Product:ELISE_Semantic_processor_(ELVEES_Image_Semantic_Engine)" target="_blank">ELVEES</a> platform was used.
+
+mips64r6 OpenVX port was verified on Boston FPGA board with bitfile supporting [I6500](https://www.mips.com/products/warrior/i-class-i6500-multiprocessor-core/) processor.
+mips32r5 OpenVX port was verified on ELVEES platform.
 
 ## MIPS build
 ```
