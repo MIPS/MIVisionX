@@ -7,6 +7,7 @@ Separable filter
 	1
 	1
 */
+
 int HafCpu_Box_U8_U8_3x3
 	(
 		vx_uint32     dstWidth,
@@ -105,9 +106,9 @@ int HafCpu_Box_U8_U8_3x3
 
 	for (int x = 0; x < postfixWidth; x++, pLocalSrc++)
 	{
-		*pLocalPrevRow++ = (vx_uint16)pLocalSrc[- (int) srcImageStrideInBytes - 1]
+		*pLocalPrevRow++ = (vx_uint16) pLocalSrc[- (int) srcImageStrideInBytes - 1]
                             + (vx_uint16) pLocalSrc[-(int) srcImageStrideInBytes]
-                            + (vx_uint16)pLocalSrc[-(int) srcImageStrideInBytes + 1];
+                            + (vx_uint16) pLocalSrc[-(int) srcImageStrideInBytes + 1];
 		*pLocalCurrRow++ = (vx_uint16) pLocalSrc[-1] + (vx_uint16) pLocalSrc[0] + (vx_uint16) pLocalSrc[1];
 	}
 #else // C variant
@@ -125,10 +126,10 @@ int HafCpu_Box_U8_U8_3x3
 	pLocalNextRow = pNextRow;
 
 	// Process rows 3 till the end
-	int height = (int)dstHeight;
+	int height = (int) dstHeight;
 	while (height)
 	{
-		pLocalSrc = (unsigned char *)(pSrcImage + srcImageStrideInBytes);   // Pointing to the row below
+		pLocalSrc = (unsigned char *) (pSrcImage + srcImageStrideInBytes);   // Pointing to the row below
 		pLocalDst = (unsigned char *) pDstImage;
 
 #if ENABLE_MSA
@@ -236,6 +237,234 @@ int HafCpu_Box_U8_U8_3x3
 	return AGO_SUCCESS;
 }
 
+int HafCpu_Convolve_S16_U8_3xN
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes,
+		vx_int16    * convMatrix,
+		vx_size		  convolutionHeight,
+		vx_int32      shift
+	)
+{
+	unsigned char *pLocalSrc;
+	short *pLocalDst;
+
+#if ENABLE_MSA
+	short *pLocalConvMat;
+	v16i8 *pLocalDst_msa;
+	v16i8 result0, result1, result2, result3, row, mul, temp0, temp1;
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+	v4i32 shift_v = __builtin_msa_fill_w(shift);
+	v4i32 sat_temp1, sat_temp2;
+
+	int prefixWidth = intptr_t(pDstImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+
+	// 2 bytes = 1 pixel
+	prefixWidth >>= 1;
+
+	// 16 pixels processed at a time in SSE loop
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
+#endif
+	int height = (int) dstHeight;
+	int srcStride = (int) srcImageStrideInBytes;
+	int rowLimit = (int) (convolutionHeight >> 1);
+	int numConvCoeffs = 3 * (int) convolutionHeight;
+
+while (height)
+	{
+		pLocalSrc = (unsigned char *) pSrcImage;
+		pLocalDst = (short *) pDstImage;
+#if ENABLE_MSA
+		for (int w = 0; w < prefixWidth; w++, pLocalSrc++)
+		{
+			int temp = 0;
+			int idx = numConvCoeffs - 1;
+			for (int i = -rowLimit; i <= rowLimit; i++)
+			{
+				for (int j = -1; j <= 1; j++)
+				{
+					temp += ((int) pLocalSrc[i * srcStride + j] * (int) convMatrix[idx--]);
+				}
+			}
+
+			temp >>= shift;
+			temp = min(temp, SHRT_MAX);
+			temp = max(temp, SHRT_MIN);
+			*pLocalDst++ = (short) temp;
+		}
+
+		pLocalDst_msa = (v16i8 *) pLocalDst;
+		// Each loop processess 16 pixels
+		int width = (int) (alignedWidth >> 4);
+		while (width)
+		{
+			pLocalConvMat = convMatrix + numConvCoeffs - 1;
+			result0 = __builtin_msa_ldi_b(0);
+			result1 = __builtin_msa_ldi_b(0);
+			result2 = __builtin_msa_ldi_b(0);
+			result3 = __builtin_msa_ldi_b(0);
+
+			for (int y = -rowLimit; y <= rowLimit; y++)
+			{
+				int offset = y * srcStride;
+
+				// shifted left pixels
+				row = __builtin_msa_ld_b((void *) (pLocalSrc + offset - 1), 0);
+				mul = (v16i8) __builtin_msa_fill_w((int) (*pLocalConvMat--));
+
+				// Upper 4 bytes - shiftedL pixels
+				temp1 = __builtin_msa_ilvl_b(zeromask, row);
+				temp0 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result3 = (v16i8) __builtin_msa_addv_w((v4i32) result3, (v4i32) temp0);
+
+				// Next 4 bytes - shiftedL pixels
+				v8i16 signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) temp1, 0);
+				temp0 = (v16i8) __builtin_msa_ilvr_h(signmask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result2 = (v16i8) __builtin_msa_addv_w((v4i32) result2, (v4i32) temp0);
+
+				// Next 4 bytes - shiftedL pixels
+				temp1 = __builtin_msa_ilvr_b(zeromask, row);
+				temp0 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result1 = (v16i8) __builtin_msa_addv_w((v4i32) result1, (v4i32) temp0);
+
+				// pixels at the location
+				row = __builtin_msa_ld_b((void *) (pLocalSrc + offset), 0);
+
+				// Lowest 4 bytes - shiftedL pixels
+				signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) temp1, 0);
+				temp0 = (v16i8) __builtin_msa_ilvr_h(signmask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result0 = (v16i8) __builtin_msa_addv_w((v4i32) result0, (v4i32) temp0);
+
+				mul = (v16i8) __builtin_msa_fill_w((int) (*pLocalConvMat--));
+
+				// Upper 4 bytes - at loc pixels
+				temp1 = __builtin_msa_ilvl_b(zeromask, row);
+				temp0 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result3 = (v16i8) __builtin_msa_addv_w((v4i32) result3, (v4i32) temp0);
+
+				// Next 4 bytes - at loc pixels
+				signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) temp1, 0);
+				temp0 = (v16i8) __builtin_msa_ilvr_h(signmask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result2 = (v16i8) __builtin_msa_addv_w((v4i32) result2, (v4i32) temp0);
+
+				// Next 4 bytes - at loc pixels
+				temp1 = __builtin_msa_ilvr_b(zeromask, row);
+				temp0 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result1 = (v16i8) __builtin_msa_addv_w((v4i32) result1, (v4i32) temp0);
+
+				// shifted right pixels
+				row = __builtin_msa_ld_b((void *) (pLocalSrc + offset + 1), 0);
+
+				// Lowest 4 bytes - at loc pixels
+				signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) temp1, 0);
+				temp0 = (v16i8) __builtin_msa_ilvr_h(signmask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result0 = (v16i8) __builtin_msa_addv_w((v4i32) result0, (v4i32) temp0);
+
+				mul = (v16i8) __builtin_msa_fill_w((int) (*pLocalConvMat--));
+
+				// Upper 4 bytes - shiftedR pixels
+				temp1 = __builtin_msa_ilvl_b(zeromask, row);
+				temp0 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result3 = (v16i8) __builtin_msa_addv_w((v4i32) result3, (v4i32) temp0);
+
+				// Next 4 bytes - shiftedR pixels
+				signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) temp1, 0);
+				temp0 = (v16i8) __builtin_msa_ilvr_h(signmask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result2 = (v16i8) __builtin_msa_addv_w((v4i32) result2, (v4i32) temp0);
+
+				// Next 4 bytes - shiftedR pixels
+				temp1 = __builtin_msa_ilvr_b(zeromask, row);
+				temp0 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result1 = (v16i8) __builtin_msa_addv_w((v4i32) result1, (v4i32) temp0);
+
+				// Lowest 4 bytes - shiftedR pixels
+				signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) temp1, 0);
+				temp0 = (v16i8) __builtin_msa_ilvr_h(signmask, (v8i16) temp1);
+				temp0 = (v16i8) __builtin_msa_mulv_w((v4i32) temp0, (v4i32) mul);
+				result0 = (v16i8) __builtin_msa_addv_w((v4i32) result0, (v4i32) temp0);
+			}
+
+			result0 = (v16i8) __builtin_msa_srl_w((v4i32) result0, shift_v);
+			result1 = (v16i8) __builtin_msa_srl_w((v4i32) result1, shift_v);
+			result2 = (v16i8) __builtin_msa_srl_w((v4i32) result2, shift_v);
+			result3 = (v16i8) __builtin_msa_srl_w((v4i32) result3, shift_v);
+
+			sat_temp1 = __builtin_msa_sat_s_w((v4i32) result2, 15);
+			sat_temp2 = __builtin_msa_sat_s_w((v4i32) result3, 15);
+			row = (v16i8) __builtin_msa_pckev_h((v8i16) sat_temp2, (v8i16) sat_temp1);
+
+			sat_temp1 = __builtin_msa_sat_s_w((v4i32) result0, 15);
+			sat_temp2 = __builtin_msa_sat_s_w((v4i32) result1, 15);
+			temp0 = (v16i8) __builtin_msa_pckev_h((v8i16) sat_temp2, (v8i16) sat_temp1);
+
+			__builtin_msa_st_b(temp0, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_b(row, (void *) pLocalDst_msa++, 0);
+
+			pLocalSrc += 16;
+			width--;
+		}
+
+		pLocalDst = (short *) pLocalDst_msa;
+		for (int w = 0; w < postfixWidth; w++, pLocalSrc++)
+		{
+			int temp = 0;
+			int idx = numConvCoeffs - 1;
+			for (int i = -rowLimit; i <= rowLimit; i++)
+			{
+				for (int j = -1; j <= 1; j++)
+				{
+					temp += ((int) pLocalSrc[i * srcStride + j] * (int) convMatrix[idx--]);
+				}
+			}
+
+			temp >>= shift;
+			temp = min(temp, SHRT_MAX);
+			temp = max(temp, SHRT_MIN);
+			*pLocalDst++ = (short) temp;
+		}
+#else
+		for (int w = 0; w < dstWidth; w++, pLocalSrc++)
+		{
+			int temp = 0;
+			int idx = numConvCoeffs - 1;
+			for (int i = -rowLimit; i <= rowLimit; i++)
+			{
+				for (int j = -1; j <= 1; j++)
+				{
+					temp += ((int) pLocalSrc[i * srcStride + j] * (int) convMatrix[idx--]);
+				}
+			}
+			temp >>= shift;
+			temp = min(temp, SHRT_MAX);
+			temp = max(temp, SHRT_MIN);
+			*pLocalDst++ = (short) temp;
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += (dstImageStrideInBytes >> 1);
+
+		height--;
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Convolve_U8_U8_5xN
 	(
 		vx_uint32     dstWidth,
@@ -263,8 +492,8 @@ int HafCpu_Convolve_U8_U8_5xN
 	int prefixWidth = intptr_t(pDstImage) & 15;
 	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
 	// 16 pixels processed at a time in MSA loop
-	int postfixWidth = ((int)dstWidth - prefixWidth) & 15;
-	int alignedWidth = (int)dstWidth - prefixWidth - postfixWidth;
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
 #endif
 	int height = (int) dstHeight;
 	int srcStride = (int) srcImageStrideInBytes;
@@ -295,7 +524,7 @@ int HafCpu_Convolve_U8_U8_5xN
 
 		pLocalDst_msa = (v16u8 *) pLocalDst;
 		// Each loop processess 16 pixels
-		int width = (int)(alignedWidth >> 4);
+		int width = (int) (alignedWidth >> 4);
 		while (width)
 		{
 			pLocalConvMat = convMatrix + numConvCoeffs - 1;
@@ -940,7 +1169,6 @@ int HafCpu_Median_U8_U8_3x3
 			CompareAndSwap(pixels4, pixels2);
 
 			// store median value
-			//_mm_store_si128((__m128i *)pLocalDst, pixels4);
 			__builtin_msa_st_b((v16i8) pixels4, (void *) pLocalDst, 0);
 
 			pPrevSrc += 16;
@@ -1119,7 +1347,7 @@ int HafCpu_Sobel_S16S16_U8_3x3_GXY
 	for (int x = 0; x < postfixWidth; x++, pLocalSrc++)
 	{
 		*pLocalPrevRow++ = (vx_int16) pLocalSrc[-(int) srcImageStrideInBytes + 1]
-			- (vx_int16) pLocalSrc[-(int )srcImageStrideInBytes - 1];					// Gx
+			- (vx_int16) pLocalSrc[-(int) srcImageStrideInBytes - 1];					// Gx
 		*pLocalPrevRow++ = (vx_int16) pLocalSrc[-(int) srcImageStrideInBytes - 1]
 			+ ((vx_int16) pLocalSrc[-(int) srcImageStrideInBytes] << 1)
 			+ (vx_int16) pLocalSrc[-(int) srcImageStrideInBytes + 1];					// Gy
@@ -1258,7 +1486,7 @@ int HafCpu_Sobel_S16S16_U8_3x3_GXY
 #else
 		for (int x = 0; x < dstWidth; x++, pLocalSrc++)
 		{
-			vx_int16 tempGx = (vx_int16) pLocalSrc[1] - (vx_int16)pLocalSrc[-1];
+			vx_int16 tempGx = (vx_int16) pLocalSrc[1] - (vx_int16) pLocalSrc[-1];
 			*pLocalNextRow++ = tempGx;
 			vx_int16 tempGy = (vx_int16)  pLocalSrc[-1] + ((vx_int16) pLocalSrc[0] << 1) + (vx_int16) pLocalSrc[1];
 			*pLocalNextRow++ = tempGy;
