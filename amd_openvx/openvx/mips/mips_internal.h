@@ -9,7 +9,4 @@
 #include "msa.h"
 #endif
 
-// Use only for dev phase
-#include "../../../dev/include/print_helper.h"
-
 #endif // __mips_internal_h__
