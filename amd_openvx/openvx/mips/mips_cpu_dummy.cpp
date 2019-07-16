@@ -1880,21 +1880,6 @@ int HafCpu_ScaleGaussianOrb_U8_U8_5x5
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_Convolve_U8_U8_3xN
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes,
-		vx_int16    * convMatrix,
-		vx_size		  convolutionHeight,
-		vx_int32      shift
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_Convolve_U8_U8_7xN
 	(
 		vx_uint32     dstWidth,
