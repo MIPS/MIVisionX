@@ -2139,21 +2139,6 @@ int HafCpu_Erode_U8_U1_3x3
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_FastCorners_XY_U8_Supression
-	(
-		vx_uint32       capacityOfDstCorner,
-		vx_keypoint_t   dstCorner[],
-		vx_uint32     * pDstCornerCount,
-		vx_uint32       srcWidth,
-		vx_uint32       srcHeight,
-		vx_uint8      * pSrcImage,
-		vx_uint32       srcImageStrideInBytes,
-		vx_float32      strength_threshold,
-		vx_uint8	  * pScratch
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_FastCorners_XY_U8_NoSupression
 	(
 		vx_uint32       capacityOfDstCorner,
