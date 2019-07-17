@@ -346,6 +346,89 @@ int HafCpu_ChannelCombine_U32_U8U8U8_UYVY
 	return AGO_SUCCESS;
 }
 
+int HafCpu_ChannelCombine_U32_U8U8U8_YUYV
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage0,
+		vx_uint32     srcImage0StrideInBytes,
+		vx_uint8    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_uint8    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes
+	)
+{
+#if ENABLE_MSA
+	int alignedWidth = dstWidth & ~31;
+	int postfixWidth = (int) dstWidth - alignedWidth;
+	v16i8 Y0, Y1, U, V, temp;
+#endif
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+		vx_uint8 * pLocalSrc0 = pSrcImage0;
+		vx_uint8 * pLocalSrc1 = pSrcImage1;
+		vx_uint8 * pLocalSrc2 = pSrcImage2;
+		vx_uint8 * pLocalDst = pDstImage;
+#if ENABLE_MSA
+		for (int width = 0; width < (alignedWidth >> 5); width++)
+		{
+			Y0 =  __builtin_msa_ld_b((void *) pLocalSrc0, 0);
+			Y1 =  __builtin_msa_ld_b((void *) (pLocalSrc0 + 16), 0);
+			V =  __builtin_msa_ld_b((void *) pLocalSrc1, 0);
+			U =  __builtin_msa_ld_b((void *) pLocalSrc2, 0);
+
+			temp = __builtin_msa_pckev_b(Y1, Y0);
+			Y0 = __builtin_msa_pckod_b(Y1, Y0);
+
+			Y1 = __builtin_msa_ilvr_b(Y0, temp);
+			temp = __builtin_msa_ilvl_b(Y0, temp);
+
+			Y0 = __builtin_msa_ilvr_b(U, V);
+			V = __builtin_msa_ilvl_b(U, V);
+
+			U = __builtin_msa_ilvr_b(Y0, Y1);
+			Y1 = __builtin_msa_ilvl_b(Y0, Y1);
+
+			__builtin_msa_st_b( U, (void *) pLocalDst, 0);
+			__builtin_msa_st_b( Y1, (void *) (pLocalDst + 16), 0);
+
+			Y0 = __builtin_msa_ilvr_b(V, temp);
+			temp = __builtin_msa_ilvl_b(V, temp);
+
+			__builtin_msa_st_b( Y0, (void *) (pLocalDst + 32), 0);
+			__builtin_msa_st_b( temp, (void *) (pLocalDst + 48), 0);
+
+			pLocalSrc0 += 32;
+			pLocalSrc1 += 16;
+			pLocalSrc2 += 16;
+			pLocalDst += 64;
+		}
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			*pLocalDst++ = *pLocalSrc0++;			// Y
+			*pLocalDst++ = *pLocalSrc1++;			// U
+			*pLocalDst++ = *pLocalSrc0++;			// Y
+			*pLocalDst++ = *pLocalSrc2++;			// V
+		}
+#else
+		for (int width = 0; width < dstWidth-8; width++)
+		{
+			*pLocalDst++ = *pLocalSrc0++;			// Y
+			*pLocalDst++ = *pLocalSrc1++;			// U
+			*pLocalDst++ = *pLocalSrc0++;			// Y
+			*pLocalDst++ = *pLocalSrc2++;			// V
+		}
+#endif
+		pSrcImage0 += srcImage0StrideInBytes;
+		pSrcImage1 += srcImage1StrideInBytes;
+		pSrcImage2 += srcImage2StrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_ChannelExtract_U8U8U8_U24
 	(
 		vx_uint32     dstWidth,
