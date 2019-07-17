@@ -430,6 +430,54 @@ int HafCpu_ChannelExtract_U8_U16_Pos0
 	return AGO_SUCCESS;
 }
 
+int HafCpu_ChannelExtract_U8_U16_Pos1
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+#if ENABLE_MSA
+	int alignedWidth = dstWidth & ~15;
+	int alignedTest = alignedWidth >> 4;
+	int postfixWidth = (int) dstWidth - alignedWidth;
+	v16i8 r0, r1;
+#endif
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+		vx_uint8 *pLocalSrc = pSrcImage;
+		vx_uint8 *pLocalDst = pDstImage;
+#if ENABLE_MSA
+			for (int width = 0; width < alignedTest; width++)
+			{
+				r0 =  __builtin_msa_ld_b((void *) pLocalSrc, 0);
+				r1 =  __builtin_msa_ld_b((void *) (pLocalSrc + 16), 0);
+				r0 =  __builtin_msa_pckod_b(r1, r0);
+				__builtin_msa_st_b( r0, (void *) pLocalDst, 0);
+
+				pLocalSrc += 32;
+				pLocalDst += 16;
+			}
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			pLocalSrc++;
+			*pLocalDst++ = *pLocalSrc++;
+		}
+#else
+		for (int width = 0; width < dstWidth; width++)
+		{
+			pLocalSrc++;
+			*pLocalDst++ = *pLocalSrc++;
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
 
 int HafCpu_ChannelCopy_U8_U8
 	(

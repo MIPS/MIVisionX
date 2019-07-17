@@ -1137,18 +1137,6 @@ int HafCpu_ChannelCopy_U1_U1
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_ChannelExtract_U8_U16_Pos1
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_ChannelExtract_U8_U24_Pos0
 	(
 		vx_uint32     dstWidth,
