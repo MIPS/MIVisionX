@@ -69,7 +69,6 @@ int HafCpu_BinaryCopy_U8_U8
 		v16u8 *dst = (v16u8 *) pDstBuf;
 		v16u8 r0, r1, r2, r3;
 
-		vx_size prefixBytes = intptr_t(pDstBuf) & 15;
 		vx_size sizeAligned = size & ~63;
 
 		for (unsigned int i = 0; i < sizeAligned; i += 64)
@@ -179,7 +178,7 @@ int HafCpu_ChannelCombine_U24_U8U8U8_RGB
 {
 #if ENABLE_MSA
 	int alignedWidth = dstWidth & ~15;
-	int postfixWidth = (int)dstWidth - alignedWidth;
+	int postfixWidth = (int) dstWidth - alignedWidth;
 
 	v16u8 *tbl = (v16u8 *) dataChannelCombine;
 	v16u8 r, g, b, result1, result2, result3;
@@ -310,9 +309,9 @@ int HafCpu_ChannelExtract_U8U8U8_U24
 #if ENABLE_MSA
 		for (int x = 0; x < prefixWidth; x++)
 		{
-			*pLocalDst0++ = *pSrcImage++;
-			*pLocalDst1++ = *pSrcImage++;
-			*pLocalDst2++ = *pSrcImage++;
+			*pLocalDst0++ = *pLocalSrc++;
+			*pLocalDst1++ = *pLocalSrc++;
+			*pLocalDst2++ = *pLocalSrc++;
 		}
 
 		// 16 bytes at a time
@@ -347,9 +346,9 @@ int HafCpu_ChannelExtract_U8U8U8_U24
 
 		for (int x = 0; x < postfixWidth; x++)
 		{
-			*pLocalDst0++ = *pSrcImage++;
-			*pLocalDst1++ = *pSrcImage++;
-			*pLocalDst2++ = *pSrcImage++;
+			*pLocalDst0++ = *pLocalSrc++;
+			*pLocalDst1++ = *pLocalSrc++;
+			*pLocalDst2++ = *pLocalSrc++;
 		}
 #else
 		for (int x = 0; x < dstWidth; x++)
