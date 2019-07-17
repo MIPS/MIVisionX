@@ -1264,22 +1264,6 @@ int HafCpu_ChannelCombine_U16_U8U8
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_ChannelCombine_U32_U8U8U8_UYVY
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_uint8    * pSrcImage0,
-		vx_uint32     srcImage0StrideInBytes,
-		vx_uint8    * pSrcImage1,
-		vx_uint32     srcImage1StrideInBytes,
-		vx_uint8    * pSrcImage2,
-		vx_uint32     srcImage2StrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_ChannelCombine_U32_U8U8U8_YUYV
 	(
 		vx_uint32     dstWidth,
