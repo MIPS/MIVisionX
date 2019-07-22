@@ -52,11 +52,11 @@ DECL_ALIGN(16) unsigned char dataChannelCombine[16 * 15] ATTR_ALIGN(16) = {
 };
 
 int HafCpu_BinaryCopy_U8_U8
-    (
-	    vx_size		size,
-	    vx_uint8	  * pDstBuf,
-	    vx_uint8	  * pSrcBuf
-    )
+	(
+		vx_size		size,
+		vx_uint8	  * pDstBuf,
+		vx_uint8	  * pSrcBuf
+	)
 {
 	if ((intptr_t(pSrcBuf) & 15) | (intptr_t(pDstBuf) & 15))
 	{
@@ -90,75 +90,84 @@ int HafCpu_BinaryCopy_U8_U8
 		memcpy(pDstBuf, pSrcBuf, size);
 #endif
 	}
-
-    return AGO_SUCCESS;
+	return AGO_SUCCESS;
 }
 
-int HafCpu_MemSet_U32
+int HafCpu_ChannelCombine_U16_U8U8
 	(
-		vx_size       count,
-		vx_uint32   * pDstBuf,
-		vx_uint32     value
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage0,
+		vx_uint32     srcImage0StrideInBytes,
+		vx_uint8    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes
 	)
 {
+	unsigned char *pLocalSrc0, *pLocalSrc1, *pLocalDst;
 #if ENABLE_MSA
-    vx_uint32 valArray[4] = {value, value, value, value};
-    v4u32 val = (v4u32) __builtin_msa_ld_w((void *) &valArray, 0);
-    v4u32 *buf = (v4u32 *) pDstBuf;
-    v4u32 *buf_end = buf + (count >> 2);
-    for (; buf != buf_end; buf++)
-	__builtin_msa_st_w((v4i32) val, (void *) buf, 0);
-#else
-    vx_uint32 *buf = (vx_uint32 *) pDstBuf;
-    vx_uint32 *buf_end = buf + count;
-    for (; buf != buf_end; buf++)
-	*buf = value;
-#endif
-    return AGO_SUCCESS;
-}
+	v16u8 r0, r1, resultL, resultH;
+	v16u8 *pLocalSrc0_msa, *pLocalSrc1_msa, *pLocalDst_msa;
+	v16i8 zeromask = (v16i8) __builtin_msa_ldi_b(0);
 
-int HafCpu_MemSet_U16
-    (
-	vx_size       count,
-	vx_uint16   * pDstBuf,
-	vx_uint16     value
-    )
-{
-#if 0 //ENABLE_MSA
-	__m128i val = _mm_set1_epi16((short)value);
-	__m128i * buf = (__m128i *) pDstBuf;
-	__m128i * buf_end = buf + (count >> 3);
-	for (; buf != buf_end; buf++)
-		_mm_store_si128(buf, val);
-#else
-    vx_uint16 *buf = (vx_uint16 *) pDstBuf;
-    vx_uint16 *buf_end = buf + count;
-    for (; buf != buf_end; buf++)
-	*buf = value;
-#endif
-    return AGO_SUCCESS;
-}
+	int prefixWidth = intptr_t(pDstImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+	// 32 pixels processed at a time in MSA loop
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 31;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
 
-int HafCpu_MemSet_U8
-	(
-		vx_size      count,
-		vx_uint8   * pDstBuf,
-		vx_uint8     value
-	)
-{
-#if 0 //ENABLE_MSA
-	vx_uint32 valArray[4] = {value, value, value, value};
-	v4u32 val = (v4u32) __builtin_msa_ld_w((void *) &valArray, 0);
-	v4u32 *buf = (v4u32*) pDstBuf;
-	v4u32 *buf_end = buf + (count >> 2);
-	for (; buf != buf_end; buf++)
-		__builtin_msa_st_w((v4i32) val, (void*) buf, 0);
-#else
-	vx_uint8 *buf = (vx_uint8 *) pDstBuf;
-	vx_uint8 *buf_end = buf + count;
-	for (; buf != buf_end; buf++)
-		*buf = value;
 #endif
+
+	int height = (int) dstHeight;
+	while (height)
+	{
+		pLocalSrc0 = (unsigned char *) pSrcImage0;
+		pLocalSrc1 = (unsigned char *) pSrcImage1;
+		pLocalDst = (unsigned char *) pDstImage;
+#if ENABLE_MSA
+		for (int x = 0; x < prefixWidth; x++)
+		{
+			*pLocalDst++ = *pLocalSrc0++;
+			*pLocalDst++ = *pLocalSrc1++;
+		}
+
+		// 16 byte pairs copied into dst at once
+		int width = (int) (dstWidth >> 4);
+		pLocalSrc0_msa = (v16u8 *) pLocalSrc0;
+		pLocalSrc1_msa = (v16u8 *) pLocalSrc1;
+		pLocalDst_msa = (v16u8 *) pLocalDst;
+		while (width)
+		{
+			r0 = (v16u8) __builtin_msa_ld_b((void *) pLocalSrc0_msa++, 0);
+			r1 = (v16u8) __builtin_msa_ld_b((void *) pLocalSrc1_msa++, 0);
+			resultL = (v16u8) __builtin_msa_ilvr_b((v16i8) r1, (v16i8) r0);
+			resultH = (v16u8) __builtin_msa_ilvl_b((v16i8) r1, (v16i8) r0);
+			__builtin_msa_st_b((v16i8) resultL, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_b((v16i8) resultH, (void *) pLocalDst_msa++, 0);
+			width--;
+		}
+
+		pLocalSrc0 = (unsigned char *) pLocalSrc0_msa;
+		pLocalSrc1 = (unsigned char *) pLocalSrc1_msa;
+		pLocalDst = (unsigned char *) pLocalDst_msa;
+		for (int x = 0; x < postfixWidth; x++)
+		{
+			*pLocalDst++ = *pLocalSrc0++;
+			*pLocalDst++ = *pLocalSrc1++;
+		}
+#else	// C
+		for (int x = 0; x < dstWidth; x++)
+		{
+			*pLocalDst++ = *pLocalSrc0++;
+			*pLocalDst++ = *pLocalSrc1++;
+		}
+#endif
+		pSrcImage0 += srcImage0StrideInBytes;
+		pSrcImage1 += srcImage1StrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+		height--;
+	}
 	return AGO_SUCCESS;
 }
 
@@ -293,10 +302,10 @@ int HafCpu_ChannelCombine_U32_U8U8U8_UYVY
 #if ENABLE_MSA
 		for (int width = 0; width < (alignedWidth >> 5); width++)
 		{
-			Y0 =  __builtin_msa_ld_b((void *) pLocalSrc0, 0);
-			Y1 =  __builtin_msa_ld_b((void *) (pLocalSrc0 + 16), 0);
-			U =  __builtin_msa_ld_b((void *) pLocalSrc1, 0);
-			V =  __builtin_msa_ld_b((void *) pLocalSrc2, 0);
+			Y0 = __builtin_msa_ld_b((void *) pLocalSrc0, 0);
+			Y1 = __builtin_msa_ld_b((void *) (pLocalSrc0 + 16), 0);
+			U = __builtin_msa_ld_b((void *) pLocalSrc1, 0);
+			V = __builtin_msa_ld_b((void *) pLocalSrc2, 0);
 
 			temp = __builtin_msa_pckev_b(Y1, Y0);
 			Y0 = __builtin_msa_pckod_b(Y1, Y0);
@@ -374,10 +383,10 @@ int HafCpu_ChannelCombine_U32_U8U8U8_YUYV
 #if ENABLE_MSA
 		for (int width = 0; width < (alignedWidth >> 5); width++)
 		{
-			Y0 =  __builtin_msa_ld_b((void *) pLocalSrc0, 0);
-			Y1 =  __builtin_msa_ld_b((void *) (pLocalSrc0 + 16), 0);
-			V =  __builtin_msa_ld_b((void *) pLocalSrc1, 0);
-			U =  __builtin_msa_ld_b((void *) pLocalSrc2, 0);
+			Y0 = __builtin_msa_ld_b((void *) pLocalSrc0, 0);
+			Y1 = __builtin_msa_ld_b((void *) (pLocalSrc0 + 16), 0);
+			V = __builtin_msa_ld_b((void *) pLocalSrc1, 0);
+			U = __builtin_msa_ld_b((void *) pLocalSrc2, 0);
 
 			temp = __builtin_msa_pckev_b(Y1, Y0);
 			Y0 = __builtin_msa_pckod_b(Y1, Y0);
@@ -619,9 +628,9 @@ int HafCpu_ChannelExtract_U8_U16_Pos1
 #if ENABLE_MSA
 			for (int width = 0; width < alignedTest; width++)
 			{
-				r0 =  __builtin_msa_ld_b((void *) pLocalSrc, 0);
-				r1 =  __builtin_msa_ld_b((void *) (pLocalSrc + 16), 0);
-				r0 =  __builtin_msa_pckod_b(r1, r0);
+				r0 = __builtin_msa_ld_b((void *) pLocalSrc, 0);
+				r1 = __builtin_msa_ld_b((void *) (pLocalSrc + 16), 0);
+				r0 = __builtin_msa_pckod_b(r1, r0);
 				__builtin_msa_st_b( r0, (void *) pLocalDst, 0);
 
 				pLocalSrc += 32;
@@ -714,6 +723,74 @@ int HafCpu_ChannelCopy_U8_U8
 		pDstImage += dstImageStrideInBytes;
 		height--;
 	}
+#endif
+	return AGO_SUCCESS;
+}
+
+int HafCpu_MemSet_U32
+	(
+		vx_size       count,
+		vx_uint32   * pDstBuf,
+		vx_uint32     value
+	)
+{
+#if ENABLE_MSA
+	vx_uint32 valArray[4] = {value, value, value, value};
+	v4u32 val = (v4u32) __builtin_msa_ld_w((void *) &valArray, 0);
+	v4u32 *buf = (v4u32 *) pDstBuf;
+	v4u32 *buf_end = buf + (count >> 2);
+	for (; buf != buf_end; buf++)
+		__builtin_msa_st_w((v4i32) val, (void *) buf, 0);
+#else
+	vx_uint32 *buf = (vx_uint32 *) pDstBuf;
+	vx_uint32 *buf_end = buf + count;
+	for (; buf != buf_end; buf++)
+		*buf = value;
+#endif
+	return AGO_SUCCESS;
+}
+
+int HafCpu_MemSet_U16
+	(
+		vx_size       count,
+		vx_uint16   * pDstBuf,
+		vx_uint16     value
+	)
+{
+#if 0 //ENABLE_MSA
+	__m128i val = _mm_set1_epi16((short)value);
+	__m128i * buf = (__m128i *) pDstBuf;
+	__m128i * buf_end = buf + (count >> 3);
+	for (; buf != buf_end; buf++)
+		_mm_store_si128(buf, val);
+#else
+	vx_uint16 *buf = (vx_uint16 *) pDstBuf;
+	vx_uint16 *buf_end = buf + count;
+	for (; buf != buf_end; buf++)
+		*buf = value;
+#endif
+	return AGO_SUCCESS;
+}
+
+int HafCpu_MemSet_U8
+	(
+		vx_size      count,
+		vx_uint8   * pDstBuf,
+		vx_uint8     value
+	)
+{
+#if 0 //ENABLE_MSA
+	vx_uint32 valArray[4] = {value, value, value, value};
+	v4u32 val = (v4u32) __builtin_msa_ld_w((void *) &valArray, 0);
+	v4u32 *buf = (v4u32*) pDstBuf;
+	v4u32 *buf_end = buf + (count >> 2);
+	for (; buf != buf_end; buf++)
+		__builtin_msa_st_w((v4i32) val, (void*) buf, 0);
+#else
+	vx_uint8 *buf = (vx_uint8 *) pDstBuf;
+	vx_uint8 *buf_end = buf + count;
+	for (; buf != buf_end; buf++)
+		*buf = value;
 #endif
 	return AGO_SUCCESS;
 }
