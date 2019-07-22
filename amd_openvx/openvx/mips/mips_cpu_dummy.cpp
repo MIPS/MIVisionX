@@ -1460,18 +1460,6 @@ int HafCpu_ColorConvert_YUV4_RGBX
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_ScaleUp2x2_U8_U8
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_FormatConvert_UV_UV12
 	(
 		vx_uint32     dstWidth,
