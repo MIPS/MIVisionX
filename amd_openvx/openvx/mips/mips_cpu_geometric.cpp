@@ -4,6 +4,170 @@
 #define FP_BITS		18
 #define FP_MUL		(1 << FP_BITS)
 
+int HafCpu_ScaleImage_U8_U8_Bilinear
+(
+vx_uint32            dstWidth,
+vx_uint32            dstHeight,
+vx_uint8           * pDstImage,
+vx_uint32            dstImageStrideInBytes,
+vx_uint32            srcWidth,
+vx_uint32            srcHeight,
+vx_uint8           * pSrcImage,
+vx_uint32            srcImageStrideInBytes,
+ago_scale_matrix_t * matrix
+)
+{
+	int xinc, yinc, xoffs, yoffs;
+	unsigned char *pdst = pDstImage;
+
+#if ENABLE_MSA
+	v8i16 pp1, pp2;
+	v8i16 mask = __builtin_msa_ldi_h((short) 0xff);
+	v8i16 round = __builtin_msa_ldi_h((short) 0x80);
+
+	// nearest multiple of 8
+	unsigned int newDstWidth = dstWidth & ~7;
+#endif
+
+	// to convert to fixed point
+	yinc = (int) (FP_MUL * matrix->yscale);
+	xinc = (int) (FP_MUL * matrix->xscale);
+
+	// to convert to fixed point
+	yoffs = (int) (FP_MUL * matrix->yoffset);
+	xoffs = (int) (FP_MUL * matrix->xoffset);
+
+	int alignW = (dstWidth + 15) & ~15;
+	unsigned short *Xmap = (unsigned short *) ((vx_uint8 *) matrix + sizeof(AgoConfigScaleMatrix));
+	unsigned short *Xfrac = Xmap + alignW;
+	unsigned short *One_min_xf = Xfrac + alignW;
+
+	int xpos = xoffs;
+	for (unsigned int x = 0; x < dstWidth; x++, xpos += xinc)
+	{
+		int xf;
+		int xmap = (xpos >> FP_BITS);
+		if (xmap >= (int) (srcWidth - 1)){
+			Xmap[x] = (unsigned short) (srcWidth - 1);
+		}
+		Xmap[x] = (xmap < 0) ? 0: (unsigned short) xmap;
+		xf = ((xpos & 0x3ffff) + 0x200) >> 10;
+		Xfrac[x] = xf;
+		One_min_xf[x] = (0x100 - xf);
+	}
+
+	for (int y = 0, ypos = yoffs; y < (int) dstHeight; y++, ypos += yinc)
+	{
+		unsigned int x = 0;
+		vx_uint8 *pSrc1, *pSrc2;
+		int ym, yf, one_min_yf;
+
+		ym = (ypos >> FP_BITS);
+		yf = ((ypos & 0x3ffff) + 0x200) >> 10;
+		one_min_yf = (0x100 - yf);
+		yoffs = ym * srcImageStrideInBytes;
+		if (ym < 0){
+			ym = yoffs = 0;
+			pSrc1 = pSrc2 = pSrcImage;
+		}
+		else if (ym >= (int) (srcHeight - 1)){
+			ym = srcHeight - 1;
+			pSrc1 = pSrc2 = pSrcImage + ym * srcImageStrideInBytes;
+		}
+		else
+		{
+			pSrc1 = pSrcImage + ym * srcImageStrideInBytes;
+			pSrc2 = pSrc1 + srcImageStrideInBytes;
+		}
+
+#if ENABLE_MSA
+		v8i16 rmsa0, rmsa7;
+
+		rmsa0 = __builtin_msa_fill_h((unsigned short) one_min_yf);
+		rmsa7 = __builtin_msa_fill_h((unsigned short) yf);
+
+		for (; x < newDstWidth; x += 8)
+		{
+			v8i16 mapxy, rmsa1, rmsa2, rmsa3, rmsa4;
+
+			// mapped table [srcx7...src_x3, src_x2, src_x1, src_x0]
+			mapxy = __builtin_msa_ld_h((void *) &Xmap[x], 0);
+
+#if __mips_isa_rev < 6
+			v16u8 pp1r = (v16u8) pp1;
+			v16u8 pp2r = (v16u8) pp2;
+#endif
+			// load pixels for mapxy
+			for (int xx = 0; xx < 8; xx++)
+			{
+#if __mips_isa_rev < 6
+				unsigned char temp1 = ((unsigned char *) &pSrc1[((int16_t *) &mapxy)[xx]])[0];
+				unsigned char temp2 = ((unsigned char *) &pSrc1[((int16_t *) &mapxy)[xx]])[1];
+				pp1r[2 * xx] = temp1;
+				pp1r[2 * xx + 1] = temp2;
+
+				temp1 = ((unsigned char *) &pSrc2[((int16_t *) &mapxy)[xx]])[0];
+				temp2 = ((unsigned char *) &pSrc2[((int16_t *) &mapxy)[xx]])[1];
+				pp2r[2 * xx] = temp1;
+				pp2r[2 * xx + 1] = temp2;
+#else
+				pp1[xx] = ((unsigned short *) &pSrc1[((int16_t *) &mapxy)[xx]])[0];
+				pp2[xx] = ((unsigned short *) &pSrc2[((int16_t *) &mapxy)[xx]])[0];
+#endif
+			}
+#if __mips_isa_rev < 6
+			pp1 = (v8i16) pp1r;
+			pp2 = (v8i16) pp2r;
+#endif
+			rmsa1 = (v8i16) __builtin_msa_and_v((v16u8) pp1, (v16u8) mask);
+			pp1 = __builtin_msa_srli_h(pp1, 8);
+
+			rmsa4 = (v8i16) __builtin_msa_and_v((v16u8) pp2, (v16u8) mask);
+			pp2 = __builtin_msa_srli_h(pp2, 8);
+
+			rmsa2 = __builtin_msa_ld_h((void *) &Xfrac[x], 0);
+			rmsa3 = __builtin_msa_ld_h((void *) &One_min_xf[x], 0);
+
+			rmsa1 = __builtin_msa_mulv_h(rmsa1, rmsa3);
+			pp1 = __builtin_msa_mulv_h(pp1, rmsa2);
+			rmsa1 = __builtin_msa_addv_h(rmsa1, pp1);
+			rmsa1 = __builtin_msa_addv_h(rmsa1, round);
+			rmsa1 = __builtin_msa_srli_h(rmsa1, 8);
+
+			rmsa4 = __builtin_msa_mulv_h(rmsa4, rmsa3);
+			pp2 = __builtin_msa_mulv_h(pp2, rmsa2);
+			rmsa4 = __builtin_msa_addv_h(rmsa4, pp2);
+			rmsa4 = __builtin_msa_addv_h(rmsa4, round);
+			rmsa4 = __builtin_msa_srli_h(rmsa4, 8);
+
+			rmsa1 = __builtin_msa_mulv_h(rmsa1, rmsa0);
+			rmsa4 = __builtin_msa_mulv_h(rmsa4, rmsa7);
+			rmsa1 = __builtin_msa_addv_h(rmsa1, rmsa4);
+			rmsa1 = __builtin_msa_addv_h(rmsa1, round);
+			rmsa1 = __builtin_msa_srli_h(rmsa1, 8);
+			v16i8 temp = (v16i8)__builtin_msa_sat_u_b((v16u8) rmsa1, 7);
+			rmsa1 = (v8i16) __builtin_msa_pckev_b(temp, temp);
+
+			*(long long*) (pDstImage + x) = ((v2i64) rmsa1)[0];
+		}
+
+		for (x = newDstWidth; x < dstWidth; x++) {
+			const unsigned char *p0 = pSrc1 + Xmap[x];
+			const unsigned char *p1 = pSrc2 + Xmap[x];
+			pDstImage[x] = ((One_min_xf[x] * one_min_yf*p0[0]) + (Xfrac[x] * one_min_yf*p0[1]) + (One_min_xf[x] * yf*p1[0]) + (Xfrac[x] * yf*p1[1]) + 0x8000) >> 16;
+		}
+#else
+		for (x = 0; x < dstWidth; x++) {
+			const unsigned char *p0 = pSrc1 + Xmap[x];
+			const unsigned char *p1 = pSrc2 + Xmap[x];
+			pDstImage[x] = ((One_min_xf[x] * one_min_yf*p0[0]) + (Xfrac[x] * one_min_yf*p0[1]) + (One_min_xf[x] * yf*p1[0]) + (Xfrac[x] * yf*p1[1]) + 0x8000) >> 16;
+		}
+#endif
+		pDstImage += dstImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_ScaleImage_U8_U8_Nearest
 (
 vx_uint32            dstWidth,
