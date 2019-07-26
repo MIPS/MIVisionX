@@ -316,48 +316,20 @@ int HafCpu_Add_U8_U8U8_Sat
 		vx_uint32     srcImage2StrideInBytes
 	)
 {
-	bool useAligned = ((((intptr_t)pSrcImage1 | (intptr_t)pSrcImage2 | (intptr_t)pDstImage) & 0xF) == 0) ? true : false;
-
 	vx_uint8 *pLocalSrc1, *pLocalSrc2, *pLocalDst;
-#if 0 //ENABLE_MSA
-//	  __m128i *pLocalSrc1_msa, *pLocalSrc2_msa, *pLocalDst_msa;
-//	  __m128i pixels1, pixels2;
-	int alignedWidth = dstWidth & ~15;
-	int postfixWidth = dstWidth - alignedWidth;
-#endif
 
 	for (int height = 0; height < (int) dstHeight; height++)
 	{
-
 #if 0 //ENABLE_MSA
-			pLocalSrc1_msa = (__m128i*) pSrcImage1;
-			pLocalSrc2_msa = (__m128i*) pSrcImage2;
-			pLocalDst_msa = (__m128i*) pDstImage;
-
-			for (int width = 0; width < alignedWidth; width += 16)
-			{
-				pixels1 = _mm_load_si128(pLocalSrc1_msa++);
-				pixels2 = _mm_load_si128(pLocalSrc2_msa++);
-				pixels1 = _mm_adds_epu8(pixels1, pixels2);
-				_mm_store_si128(pLocalDst_msa++, pixels1);
-			}
-
-			pLocalSrc1 = (vx_uint8 *)pLocalSrc1_msa;
-			pLocalSrc2 = (vx_uint8 *)pLocalSrc2_msa;
-			pLocalDst = (vx_uint8 *)pLocalDst_msa;
-
-			for (int width = 0; width < postfixWidth; width++)
-			{
-				int temp = (int)(*pLocalSrc1++) + (int)(*pLocalSrc2++);
-				*pLocalDst++ = (vx_uint8) min(temp, UINT8_MAX);
-				// !! probably needs
-				// *pLocalDst++ = (vx_uint8) max(min(temp, UINT8_MAX), 0);
-			}
 #else
+		pLocalSrc1 = (vx_uint8 *) pSrcImage1;
+		pLocalSrc2 = (vx_uint8 *) pSrcImage2;
+		pLocalDst = (vx_uint8 *) pDstImage;
+
 		for (int width = 0; width < dstWidth; width++)
 		{
-			int temp = (int)(*pLocalSrc1++) + (int)(*pLocalSrc2++);
-			*pLocalDst++ = (vx_uint8) min(temp, UINT8_MAX);
+			int temp = (int) (*pLocalSrc1++) + (int) (*pLocalSrc2++);
+			*pLocalDst++ = (vx_uint8) max(min((int) temp, UINT8_MAX), 0);
 		}
 
 #endif

@@ -737,6 +737,7 @@ int HafCpu_MemSet_U32
 #if ENABLE_MSA
 	vx_uint32 valArray[4] = {value, value, value, value};
 	v4u32 val = (v4u32) __builtin_msa_ld_w((void *) &valArray, 0);
+
 	v4u32 *buf = (v4u32 *) pDstBuf;
 	v4u32 *buf_end = buf + (count >> 2);
 	for (; buf != buf_end; buf++)
@@ -757,15 +758,18 @@ int HafCpu_MemSet_U16
 		vx_uint16     value
 	)
 {
-#if 0 //ENABLE_MSA
-	__m128i val = _mm_set1_epi16((short)value);
-	__m128i * buf = (__m128i *) pDstBuf;
-	__m128i * buf_end = buf + (count >> 3);
+#if ENABLE_MSA
+	v8u16 val = (v8u16) __builtin_msa_fill_h(value);
+
+	v8u16 *buf = (v8u16 *) pDstBuf;
+	v8u16 *buf_end = buf + (count >> 3);
+
 	for (; buf != buf_end; buf++)
-		_mm_store_si128(buf, val);
+		__builtin_msa_st_h((v8i16) val, (void*) buf, 0);
 #else
 	vx_uint16 *buf = (vx_uint16 *) pDstBuf;
 	vx_uint16 *buf_end = buf + count;
+
 	for (; buf != buf_end; buf++)
 		*buf = value;
 #endif
@@ -779,16 +783,20 @@ int HafCpu_MemSet_U8
 		vx_uint8     value
 	)
 {
-#if 0 //ENABLE_MSA
-	vx_uint32 valArray[4] = {value, value, value, value};
-	v4u32 val = (v4u32) __builtin_msa_ld_w((void *) &valArray, 0);
-	v4u32 *buf = (v4u32*) pDstBuf;
-	v4u32 *buf_end = buf + (count >> 2);
+	// For C implementation of this function, compiler will use memset.S,
+	// and benchmarks shown that, on 64b platform, this is faster then MSA code.
+#if ENABLE_MSA && __mips == 32
+	v16u8 val = (v16u8) __builtin_msa_fill_b(value);
+
+	v16u8 *buf = (v16u8 *) pDstBuf;
+	v16u8 *buf_end = buf + (count >> 4);
+
 	for (; buf != buf_end; buf++)
-		__builtin_msa_st_w((v4i32) val, (void*) buf, 0);
+		__builtin_msa_st_b((v16i8) val, (void*) buf, 0);
 #else
 	vx_uint8 *buf = (vx_uint8 *) pDstBuf;
 	vx_uint8 *buf_end = buf + count;
+
 	for (; buf != buf_end; buf++)
 		*buf = value;
 #endif
