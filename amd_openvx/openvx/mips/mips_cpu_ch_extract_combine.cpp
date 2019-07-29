@@ -438,6 +438,110 @@ int HafCpu_ChannelCombine_U32_U8U8U8_YUYV
 	return AGO_SUCCESS;
 }
 
+int HafCpu_ChannelCombine_U32_U8U8U8U8_RGBX
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage0,
+		vx_uint32     srcImage0StrideInBytes,
+		vx_uint8    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_uint8    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes,
+		vx_uint8    * pSrcImage3,
+		vx_uint32     srcImage3StrideInBytes
+	)
+{
+	int height = (int) dstHeight;
+
+#if ENABLE_MSA
+	v16u8 r, g, b, x, pixels0, pixels1, pixels2;
+	v16i8 zeromask = (v16i8) __builtin_msa_ldi_b(0);
+
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = (int) dstWidth - alignedWidth;
+#endif
+
+	while (height)
+	{
+		vx_uint8 * pLocalSrc0 = pSrcImage0;
+		vx_uint8 * pLocalSrc1 = pSrcImage1;
+		vx_uint8 * pLocalSrc2 = pSrcImage2;
+		vx_uint8 * pLocalSrc3 = pSrcImage3;
+		vx_uint8 * pLocalDst = pDstImage;
+		// Inner loop processess 16 pixels at a time
+		int width = (int) (dstWidth >> 4);
+
+#if ENABLE_MSA
+		while (width)
+		{
+			r = (v16u8) __builtin_msa_ld_b((void *) pLocalSrc0, 0);
+			g = (v16u8) __builtin_msa_ld_b((void *) pLocalSrc1, 0);
+			b = (v16u8) __builtin_msa_ld_b((void *) pLocalSrc2, 0);
+			x = (v16u8) __builtin_msa_ld_b((void *) pLocalSrc3, 0);
+
+			// r0 g0 r1 g1 r2 g2 r3 g3 r4 g4 r5 g5 r6 g6 r7 g7
+			pixels0 = (v16u8) __builtin_msa_ilvr_b((v16i8) g, (v16i8) r);
+			// b0 x0 b1 x1 b2 x2 b3 x3 b4 x4 b5 x5 b6 x6 b7 x7
+			pixels1 = (v16u8) __builtin_msa_ilvr_b((v16i8) x, (v16i8) b);
+			// r0 g0 b0 x0 r1 g1 b1 x1 r2 g2 b2 x2 r3 g3 b3 x3
+			pixels2 = (v16u8) __builtin_msa_ilvr_h((v8i16) pixels1, (v8i16) pixels0);
+			__builtin_msa_st_b((v16i8) pixels2, (void *) pLocalDst, 0);
+			pLocalDst += 16;
+			// r4 g4 b4 x4 r5 g5 b5 x5 r6 g6 b6 x6 r7 g7 b7 x7
+			pixels2 = (v16u8) __builtin_msa_ilvl_h((v8i16) pixels1, (v8i16) pixels0);
+			__builtin_msa_st_b((v16i8) pixels2, (void *) pLocalDst, 0);
+			pLocalDst += 16;
+
+			// r8 g8 r9 g9 r10 g10 r11 g11 r12 g12 r13 g13 r14 g14 r15 g15
+			pixels0 = (v16u8) __builtin_msa_ilvl_b((v16i8) g, (v16i8) r);
+			// b8 x8 b9 x9 b10 x10 b11 x11 b12 x12 b13 x13 b14 x14 b15 x15
+			pixels1 = (v16u8) __builtin_msa_ilvl_b((v16i8) x, (v16i8) b);
+			// r8 g8 b8 x8 r9 g9 b9 x9 r10 g10 b10 x10 r11 g11 b11 x11
+			pixels2 = (v16u8) __builtin_msa_ilvr_h((v8i16) pixels1, (v8i16) pixels0);
+			__builtin_msa_st_b((v16i8) pixels2, (void *) pLocalDst, 0);
+			pLocalDst += 16;
+			// r12 g12 b12 x12 r13 g13 b13 x13 r14 g14 b14 x14 r15 g15 b15 x15
+			pixels2 = (v16u8) __builtin_msa_ilvl_h((v8i16) pixels1, (v8i16) pixels0);
+			__builtin_msa_st_b((v16i8) pixels2, (void *) pLocalDst, 0);
+			pLocalDst += 16;
+
+			width--;
+			pLocalSrc0 += 16;
+			pLocalSrc1 += 16;
+			pLocalSrc2 += 16;
+			pLocalSrc3 += 16;
+		}
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			*pLocalDst++ = *pLocalSrc0++;
+			*pLocalDst++ = *pLocalSrc1++;
+			*pLocalDst++ = *pLocalSrc2++;
+			*pLocalDst++ = *pLocalSrc3++;
+		}
+#else	// C
+		for (int width = 0; width < dstWidth; width++)
+		{
+			*pLocalDst++ = *pLocalSrc0++;
+			*pLocalDst++ = *pLocalSrc1++;
+			*pLocalDst++ = *pLocalSrc2++;
+			*pLocalDst++ = *pLocalSrc3++;
+		}
+#endif
+		pSrcImage0 += srcImage0StrideInBytes;
+		pSrcImage1 += srcImage1StrideInBytes;
+		pSrcImage2 += srcImage2StrideInBytes;
+		pSrcImage3 += srcImage3StrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+
+		height--;
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_ChannelExtract_U8U8U8_U24
 	(
 		vx_uint32     dstWidth,
