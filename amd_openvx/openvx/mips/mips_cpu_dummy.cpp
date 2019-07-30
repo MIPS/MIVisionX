@@ -2145,22 +2145,6 @@ int HafCpu_Remap_U8_U8_Bilinear_Constant
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_WarpAffine_U8_U8_Nearest
-	(
-		vx_uint32             dstWidth,
-		vx_uint32             dstHeight,
-		vx_uint8            * pDstImage,
-		vx_uint32             dstImageStrideInBytes,
-		vx_uint32             srcWidth,
-		vx_uint32             srcHeight,
-		vx_uint8            * pSrcImage,
-		vx_uint32             srcImageStrideInBytes,
-		ago_affine_matrix_t * matrix,
-		vx_uint8			* pLocalData
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_WarpAffine_U8_U8_Nearest_Constant
 	(
 		vx_uint32             dstWidth,

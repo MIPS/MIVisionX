@@ -5,17 +5,17 @@
 #define FP_MUL		(1 << FP_BITS)
 
 int HafCpu_ScaleImage_U8_U8_Bilinear
-(
-vx_uint32            dstWidth,
-vx_uint32            dstHeight,
-vx_uint8           * pDstImage,
-vx_uint32            dstImageStrideInBytes,
-vx_uint32            srcWidth,
-vx_uint32            srcHeight,
-vx_uint8           * pSrcImage,
-vx_uint32            srcImageStrideInBytes,
-ago_scale_matrix_t * matrix
-)
+	(
+		vx_uint32	     dstWidth,
+		vx_uint32	     dstHeight,
+		vx_uint8	   * pDstImage,
+		vx_uint32	     dstImageStrideInBytes,
+		vx_uint32	     srcWidth,
+		vx_uint32	     srcHeight,
+		vx_uint8	   * pSrcImage,
+		vx_uint32	     srcImageStrideInBytes,
+		ago_scale_matrix_t * matrix
+	)
 {
 	int xinc, yinc, xoffs, yoffs;
 	unsigned char *pdst = pDstImage;
@@ -169,17 +169,17 @@ ago_scale_matrix_t * matrix
 }
 
 int HafCpu_ScaleImage_U8_U8_Nearest
-(
-vx_uint32            dstWidth,
-vx_uint32            dstHeight,
-vx_uint8           * pDstImage,
-vx_uint32            dstImageStrideInBytes,
-vx_uint32            srcWidth,
-vx_uint32            srcHeight,
-vx_uint8           * pSrcImage,
-vx_uint32            srcImageStrideInBytes,
-ago_scale_matrix_t * matrix
-)
+	(
+		vx_uint32	     dstWidth,
+		vx_uint32	     dstHeight,
+		vx_uint8	   * pDstImage,
+		vx_uint32	     dstImageStrideInBytes,
+		vx_uint32	     srcWidth,
+		vx_uint32	     srcHeight,
+		vx_uint8	   * pSrcImage,
+		vx_uint32	     srcImageStrideInBytes,
+		ago_scale_matrix_t * matrix
+	)
 {
 	int xinc, yinc, ypos, xpos, yoffs, xoffs;// , newDstHeight, newDstWidth;
 
@@ -221,7 +221,7 @@ ago_scale_matrix_t * matrix
 #if ENABLE_MSA
 	if (dstWidth >= 16)
 	{
-		v16i8 zeromask = __builtin_msa_ldi_b(0);
+		v8i16 zeromask = __builtin_msa_ldi_h(0);
 		v8i16 signmask;
 
 		for (y = 0; y < dstHeight; y++)
@@ -234,12 +234,12 @@ ago_scale_matrix_t * matrix
 				v16u8 mapx0, mapx1, mapx2, mapx3;
 				mapx0 = (v16u8) __builtin_msa_ld_b((void *) &Xmap[x], 0);
 				mapx1 = (v16u8) __builtin_msa_ld_b((void *) &Xmap[x + 8], 0);
-				mapx2 = (v16u8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) mapx0);
+				mapx2 = (v16u8) __builtin_msa_ilvl_h(zeromask, (v8i16) mapx0);
 
 				signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) mapx0, 0);
 				mapx0 = (v16u8) __builtin_msa_ilvr_h(signmask, (v8i16) mapx0);
 
-				mapx3 = (v16u8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) mapx1);
+				mapx3 = (v16u8) __builtin_msa_ilvl_h(zeromask, (v8i16) mapx1);
 				signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) mapx1, 0);
 				mapx1 = (v16u8) __builtin_msa_ilvr_h(signmask, (v8i16) mapx1);
 
@@ -294,14 +294,14 @@ ago_scale_matrix_t * matrix
 
 // upsample 2x2 (used for 4:2:0 to 4:4:4 conversion)
 int HafCpu_ScaleUp2x2_U8_U8
-(
-vx_uint32     dstWidth,
-vx_uint32     dstHeight,
-vx_uint8    * pDstImage,
-vx_uint32     dstImageStrideInBytes,
-vx_uint8    * pSrcImage,
-vx_uint32     srcImageStrideInBytes
-)
+	(
+		vx_uint32	     dstWidth,
+		vx_uint32	     dstHeight,
+		vx_uint8	   * pDstImage,
+		vx_uint32	     dstImageStrideInBytes,
+		vx_uint8	   * pSrcImage,
+		vx_uint32	     srcImageStrideInBytes
+	)
 {
 #if ENABLE_MSA
 	v16i8 pixels1, pixels2;
@@ -387,6 +387,235 @@ vx_uint32     srcImageStrideInBytes
 #endif
 		pchDst += (dstImageStrideInBytes * 2);
 		pSrcImage += srcImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
+
+int HafCpu_WarpAffine_U8_U8_Nearest
+	(
+		vx_uint32	     dstWidth,
+		vx_uint32	     dstHeight,
+		vx_uint8	   * pDstImage,
+		vx_uint32	     dstImageStrideInBytes,
+		vx_uint32	     srcWidth,
+		vx_uint32	     srcHeight,
+		vx_uint8	   * pSrcImage,
+		vx_uint32	     srcImageStrideInBytes,
+		ago_affine_matrix_t * matrix,
+		vx_uint8	   * pLocalData
+	)
+{
+	const float r00 = matrix->matrix[0][0];
+	const float r10 = matrix->matrix[0][1];
+	const float r01 = matrix->matrix[1][0];
+	const float r11 = matrix->matrix[1][1];
+	const float const1 = matrix->matrix[2][0];
+	const float const2 = matrix->matrix[2][1];
+
+#if ENABLE_MSA
+	v4f32 ymap, xmap, ydest, xdest;
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+
+	v4i32 sX = __builtin_msa_fill_w(srcWidth);
+	v4i32 sY = __builtin_msa_fill_w(srcHeight);
+
+	const v4f32 srcbx = __builtin_msa_ffint_s_w(sX);
+	const v4f32 srcby = __builtin_msa_ffint_s_w(sY);
+
+	v4u32 srcb = (v4u32) __builtin_msa_fill_w((srcHeight * srcImageStrideInBytes) - 1);
+	v4i32 src_s = __builtin_msa_fill_w(srcImageStrideInBytes);
+
+#endif
+
+	// check if all mapped pixels are valid or not
+	bool bBoder = (const1 < 0) | (const2 < 0) | (const1 >= srcWidth) | (const2 >= srcHeight);
+	// check for (dstWidth, 0)
+	float x1 = (r00 * dstWidth + const1);
+	float y1 = (r10 * dstWidth + const2);
+	bBoder |= (x1 < 0) | (y1 < 0) | (x1 >= srcWidth) | (y1 >= srcHeight);
+	// check for (0, dstHeight)
+	x1 = (r01 * dstHeight + const1);
+	y1 = (r11 * dstHeight + const2);
+	bBoder |= (x1 < 0) | (y1 < 0) | (x1 >= srcWidth) | (y1 >= srcHeight);
+	// check for (dstWidth, dstHeight)
+	x1 = (r00 * dstWidth + r01 * dstHeight + const1);
+	y1 = (r10 * dstWidth + r11 * dstHeight + const2);
+	bBoder |= (x1 < 0) | (y1 < 0) | (x1 >= srcWidth) | (y1 >= srcHeight);
+
+	unsigned int x, y;
+	float *r00_x, *r10_x;
+	r00_x = (float*) pLocalData;
+	r10_x = r00_x + dstWidth;
+	for (x = 0; x < dstWidth; x++){
+		r00_x[x] = r00 * x;
+		r10_x[x] = r10 * x;
+	}
+	y = 0;
+
+	if (bBoder){
+		while (y < dstHeight)
+		{
+
+			unsigned int x = 0;
+			vx_float32 yC1 = y * r01 + const1;
+			vx_float32 yC2 = y * r11 + const2;
+
+#if ENABLE_MSA
+			unsigned int *dst = (unsigned int *) pDstImage;
+
+			// calculate (y*m[0][1] + m[0][2]) for x and y
+			float xT[4] = {yC1, yC1, yC1, yC1};
+			float yT[4] = {yC2, yC2, yC2, yC2};
+
+			xdest = (v4f32) __builtin_msa_ld_w((void *) &xT, 0);
+			ydest = (v4f32) __builtin_msa_ld_w((void *) &yT, 0);
+#else
+			unsigned char *dst = (unsigned char *) pDstImage;
+#endif
+			while (x < dstWidth)
+			{
+#if ENABLE_MSA
+				v4u32 xpels, ypels;
+				// read x into xpel
+				xmap = (v4f32) __builtin_msa_ld_w((void *) &r00_x[x], 0);
+				// xf = dst[x3, x2, x1, x0]
+				xmap = __builtin_msa_fadd_w(xmap, xdest);
+
+				ymap = (v4f32) __builtin_msa_ld_w((void *) &r10_x[x], 0);
+				// ymap <- r10*x + ty
+				ymap = __builtin_msa_fadd_w(ymap, ydest);
+
+				v16u8 mask = (v16u8) __builtin_msa_fcle_w((v4f32) zeromask, xmap);
+				v16u8 fclt = (v16u8) __builtin_msa_fclt_w(xmap, srcbx);
+				mask = __builtin_msa_and_v(mask, fclt);
+
+				fclt = (v16u8) __builtin_msa_fclt_w((v4f32) zeromask, ymap);
+				mask = __builtin_msa_and_v(mask, fclt);
+
+				fclt = (v16u8) __builtin_msa_fclt_w(ymap, srcby);
+				mask = __builtin_msa_and_v(mask, fclt);
+
+				// convert to integer with rounding towards zero
+				xpels = __builtin_msa_ftrunc_u_w(xmap);
+				ypels = __builtin_msa_ftrunc_u_w(ymap);
+
+				// multiply ydest*srcImageStrideInBytes
+				ypels = (v4u32) __builtin_msa_mulv_w((v4i32) ypels, src_s);
+				// pixel location at src for dst image.
+				ypels = (v4u32) __builtin_msa_addv_w((v4i32) ypels, (v4i32) xpels);
+
+				// check if the values exceed boundary and clamp it to boundary :: need to do this to avoid memory access violations
+				ypels = __builtin_msa_min_u_w(ypels, srcb);
+				ypels = __builtin_msa_max_u_w(ypels, (v4u32) zeromask);
+
+				// check if the values exceed boundary and clamp it to boundary
+				int32_t epi32[4] = {pSrcImage[((int32_t *) &ypels)[0]], pSrcImage[((int32_t *) &ypels)[1]], pSrcImage[((int32_t *) &ypels)[2]], pSrcImage[((int32_t *) &ypels)[3]]};
+				xpels = (v4u32) __builtin_msa_ld_w((void *) &epi32, 0);
+
+				// mask for boundary: boundary pixels will substituted with xero
+				xpels = (v4u32) __builtin_msa_and_v((v16u8) xpels, mask);
+
+				// convert to unsigned char and write to dst
+				xpels = (v4u32)__builtin_msa_sat_u_h((v8u16) xpels, 15);
+				xpels = (v4u32) __builtin_msa_pckev_h((v8i16) zeromask, (v8i16) xpels);
+
+				xpels = (v4u32)__builtin_msa_sat_u_h((v8u16) xpels, 7);
+				xpels = (v4u32) __builtin_msa_pckev_b(zeromask, (v16i8) xpels);
+
+				*dst++ = ((int32_t *) &xpels)[0];
+
+				x += 4;
+#else	// C
+				vx_float32 xmap = r00_x[x] + yC1;
+				vx_float32 ymap = r10_x[x] + yC2;
+
+				vx_int32 mask = (FLT_MIN <= xmap ? INT32_MAX : INT32_MIN) & (xmap < (float) srcWidth ? INT32_MAX : INT32_MIN) &
+					(FLT_MIN < ymap ? INT32_MAX : INT32_MIN) & (ymap < (float) srcHeight ? INT32_MAX : INT32_MIN);
+
+				vx_int32 ypels = (vx_int32) ymap * srcImageStrideInBytes + (vx_int32) xmap;
+
+				ypels = (ypels < ((srcHeight * srcImageStrideInBytes) - 1)) ? ypels : ((srcHeight * srcImageStrideInBytes) - 1);
+				ypels = (ypels > 0) ? ypels : 0;
+
+				vx_int32 xpels = pSrcImage[ypels] & mask;
+				unsigned short *pok = (unsigned short *) &xpels;
+
+				*dst++ = pok[0];
+				++x;
+#endif
+			}
+			y++;
+			pDstImage += dstImageStrideInBytes;
+		}
+	}
+	else
+	{
+		while (y < dstHeight)
+		{
+			unsigned int x = 0;
+			vx_float32 yC1 = y * r01 + const1;
+			vx_float32 yC2 = y * r11 + const2;
+#if ENABLE_MSA
+			unsigned int *dst = (unsigned int *) pDstImage;
+
+			// calculate (y*m[0][1] + m[0][2]) for x and y
+			float xT[4] = {yC1, yC1, yC1, yC1};
+			float yT[4] = {yC2, yC2, yC2, yC2};
+
+			xdest = (v4f32) __builtin_msa_ld_w((void *) &xT, 0);
+			ydest = (v4f32) __builtin_msa_ld_w((void *) &yT, 0);
+#else
+			unsigned char *dst = (unsigned char *) pDstImage;
+#endif
+
+			while (x < dstWidth)
+			{
+#if ENABLE_MSA
+				v4u32 xpels, ypels;
+				// read x into xpel
+				xmap = (v4f32) __builtin_msa_ld_w((void *) &r00_x[x], 0);
+				// xf = dst[x3, x2, x1, x0]
+				xmap = __builtin_msa_fadd_w(xmap, xdest);
+
+				ymap = (v4f32) __builtin_msa_ld_w((void *) &r10_x[x], 0);
+				// ymap <- r10*x + ty
+				ymap = __builtin_msa_fadd_w(ymap, ydest);
+
+				// convert to integer with rounding towards zero
+				xpels = __builtin_msa_ftrunc_u_w(xmap);
+				ypels = __builtin_msa_ftrunc_u_w(ymap);
+
+				// multiply ydest*srcImageStrideInBytes
+				ypels = (v4u32) __builtin_msa_mulv_w((v4i32) ypels, src_s);
+				// pixel location at src for dst image.
+				ypels = (v4u32) __builtin_msa_addv_w((v4i32) ypels, (v4i32) xpels);
+
+				// check if the values exceed boundary and clamp it to boundary
+				int32_t epi32[4] = {pSrcImage[((int32_t *) &ypels)[0]], pSrcImage[((int32_t *) &ypels)[1]], pSrcImage[((int32_t *) &ypels)[2]], pSrcImage[((int32_t *) &ypels)[3]]};
+				xpels = (v4u32) __builtin_msa_ld_w((void *) &epi32, 0);;
+
+				// convert to unsigned char and write to dst
+				xpels = (v4u32)__builtin_msa_sat_u_h((v8u16) xpels, 15);
+				xpels = (v4u32) __builtin_msa_pckev_h((v8i16) zeromask, (v8i16) xpels);
+
+				xpels = (v4u32)__builtin_msa_sat_u_h((v8u16) xpels, 7);
+				xpels = (v4u32) __builtin_msa_pckev_b(zeromask, (v16i8) xpels);
+
+				*dst++ = ((int32_t *) &xpels)[0];
+				x += 4;
+#else	// C
+				vx_float32 xmap = r00_x[x] + yC1;
+				vx_float32 ymap = r10_x[x] + yC2;
+
+				vx_int32 ypels = (vx_int32) ymap * srcImageStrideInBytes + (vx_int32) xmap;
+
+				*dst++ = *((unsigned char *) &pSrcImage[ypels]);
+				x += 1;
+#endif
+			}
+			y++;
+			pDstImage += dstImageStrideInBytes;
+		}
 	}
 	return AGO_SUCCESS;
 }
