@@ -422,9 +422,8 @@ int HafCpu_WarpAffine_U8_U8_Nearest
 	const v4f32 srcbx = __builtin_msa_ffint_s_w(sX);
 	const v4f32 srcby = __builtin_msa_ffint_s_w(sY);
 
-	v4u32 srcb = (v4u32) __builtin_msa_fill_w((srcHeight * srcImageStrideInBytes) - 1);
+	v4i32 srcb = __builtin_msa_fill_w((srcHeight * srcImageStrideInBytes) - 1);
 	v4i32 src_s = __builtin_msa_fill_w(srcImageStrideInBytes);
-
 #endif
 
 	// check if all mapped pixels are valid or not
@@ -464,66 +463,61 @@ int HafCpu_WarpAffine_U8_U8_Nearest
 			unsigned int *dst = (unsigned int *) pDstImage;
 
 			// calculate (y*m[0][1] + m[0][2]) for x and y
-			float xT[4] = {yC1, yC1, yC1, yC1};
-			float yT[4] = {yC2, yC2, yC2, yC2};
+			xdest = (v4f32){yC1, yC1, yC1, yC1};
+			ydest = (v4f32){yC2, yC2, yC2, yC2};
 
-			xdest = (v4f32) __builtin_msa_ld_w((void *) &xT, 0);
-			ydest = (v4f32) __builtin_msa_ld_w((void *) &yT, 0);
 #else
 			unsigned char *dst = (unsigned char *) pDstImage;
 #endif
 			while (x < dstWidth)
 			{
 #if ENABLE_MSA
-				v4u32 xpels, ypels;
+				v4i32 xpels, ypels;
 				// read x into xpel
 				xmap = (v4f32) __builtin_msa_ld_w((void *) &r00_x[x], 0);
 				// xf = dst[x3, x2, x1, x0]
 				xmap = __builtin_msa_fadd_w(xmap, xdest);
-
 				ymap = (v4f32) __builtin_msa_ld_w((void *) &r10_x[x], 0);
 				// ymap <- r10*x + ty
 				ymap = __builtin_msa_fadd_w(ymap, ydest);
 
-				v16u8 mask = (v16u8) __builtin_msa_fcle_w((v4f32) zeromask, xmap);
+				v16u8 mask = (v16u8) __builtin_msa_fcle_w((v4f32) {0,0,0,0}, xmap);
 				v16u8 fclt = (v16u8) __builtin_msa_fclt_w(xmap, srcbx);
 				mask = __builtin_msa_and_v(mask, fclt);
 
-				fclt = (v16u8) __builtin_msa_fclt_w((v4f32) zeromask, ymap);
+				fclt = (v16u8) __builtin_msa_fclt_w((v4f32) {0,0,0,0}, ymap);
 				mask = __builtin_msa_and_v(mask, fclt);
 
 				fclt = (v16u8) __builtin_msa_fclt_w(ymap, srcby);
 				mask = __builtin_msa_and_v(mask, fclt);
 
 				// convert to integer with rounding towards zero
-				xpels = __builtin_msa_ftrunc_u_w(xmap);
-				ypels = __builtin_msa_ftrunc_u_w(ymap);
+				xpels = __builtin_msa_ftrunc_s_w(xmap);
+				ypels = __builtin_msa_ftrunc_s_w(ymap);
 
 				// multiply ydest*srcImageStrideInBytes
-				ypels = (v4u32) __builtin_msa_mulv_w((v4i32) ypels, src_s);
+				ypels = __builtin_msa_mulv_w(ypels, src_s);
 				// pixel location at src for dst image.
-				ypels = (v4u32) __builtin_msa_addv_w((v4i32) ypels, (v4i32) xpels);
+				ypels = __builtin_msa_addv_w(ypels, xpels);
+
+				// maddv is not used due to bug in gcc version 8.2.0 (Debian 8.2.0-14)
+				// in this gcc version the order of the parameters is wrong
+				// ypels = (v4u32) __builtin_msa_maddv_w( (v4i32) xpels, src_s, (v4i32) ypels);
 
 				// check if the values exceed boundary and clamp it to boundary :: need to do this to avoid memory access violations
-				ypels = __builtin_msa_min_u_w(ypels, srcb);
-				ypels = __builtin_msa_max_u_w(ypels, (v4u32) zeromask);
+				ypels = __builtin_msa_min_s_w(ypels, srcb);
+				ypels = __builtin_msa_max_s_w(ypels, (v4i32) zeromask);
 
-				// check if the values exceed boundary and clamp it to boundary
-				int32_t epi32[4] = {pSrcImage[((int32_t *) &ypels)[0]], pSrcImage[((int32_t *) &ypels)[1]], pSrcImage[((int32_t *) &ypels)[2]], pSrcImage[((int32_t *) &ypels)[3]]};
-				xpels = (v4u32) __builtin_msa_ld_w((void *) &epi32, 0);
+				xpels = (v4i32){pSrcImage[ypels[0]], pSrcImage[ypels[1]], pSrcImage[ypels[2]], pSrcImage[ypels[3]]};
 
-				// mask for boundary: boundary pixels will substituted with xero
-				xpels = (v4u32) __builtin_msa_and_v((v16u8) xpels, mask);
+
+				xpels = (v4i32) __builtin_msa_and_v((v16u8) xpels, mask);
 
 				// convert to unsigned char and write to dst
-				xpels = (v4u32)__builtin_msa_sat_u_h((v8u16) xpels, 15);
-				xpels = (v4u32) __builtin_msa_pckev_h((v8i16) zeromask, (v8i16) xpels);
+				xpels = (v4i32) __builtin_msa_pckev_h((v8i16) zeromask, (v8i16) xpels);
+				xpels = (v4i32) __builtin_msa_pckev_b(zeromask, (v16i8) xpels);
 
-				xpels = (v4u32)__builtin_msa_sat_u_h((v8u16) xpels, 7);
-				xpels = (v4u32) __builtin_msa_pckev_b(zeromask, (v16i8) xpels);
-
-				*dst++ = ((int32_t *) &xpels)[0];
-
+				*dst++ = __builtin_msa_copy_u_w(xpels, 0);
 				x += 4;
 #else	// C
 				vx_float32 xmap = r00_x[x] + yC1;
@@ -556,22 +550,16 @@ int HafCpu_WarpAffine_U8_U8_Nearest
 			vx_float32 yC1 = y * r01 + const1;
 			vx_float32 yC2 = y * r11 + const2;
 #if ENABLE_MSA
-			unsigned int *dst = (unsigned int *) pDstImage;
-
 			// calculate (y*m[0][1] + m[0][2]) for x and y
-			float xT[4] = {yC1, yC1, yC1, yC1};
-			float yT[4] = {yC2, yC2, yC2, yC2};
-
-			xdest = (v4f32) __builtin_msa_ld_w((void *) &xT, 0);
-			ydest = (v4f32) __builtin_msa_ld_w((void *) &yT, 0);
-#else
-			unsigned char *dst = (unsigned char *) pDstImage;
+			xdest = (v4f32){yC1, yC1, yC1, yC1};
+			ydest = (v4f32){yC2, yC2, yC2, yC2};
 #endif
+			unsigned char *dst = (unsigned char *) pDstImage;
 
 			while (x < dstWidth)
 			{
 #if ENABLE_MSA
-				v4u32 xpels, ypels;
+				v4i32 xpels, ypels;
 				// read x into xpel
 				xmap = (v4f32) __builtin_msa_ld_w((void *) &r00_x[x], 0);
 				// xf = dst[x3, x2, x1, x0]
@@ -582,26 +570,23 @@ int HafCpu_WarpAffine_U8_U8_Nearest
 				ymap = __builtin_msa_fadd_w(ymap, ydest);
 
 				// convert to integer with rounding towards zero
-				xpels = __builtin_msa_ftrunc_u_w(xmap);
-				ypels = __builtin_msa_ftrunc_u_w(ymap);
+				xpels = __builtin_msa_ftrunc_s_w(xmap);
+				ypels = __builtin_msa_ftrunc_s_w(ymap);
 
 				// multiply ydest*srcImageStrideInBytes
-				ypels = (v4u32) __builtin_msa_mulv_w((v4i32) ypels, src_s);
+				ypels = __builtin_msa_mulv_w(ypels, src_s);
 				// pixel location at src for dst image.
-				ypels = (v4u32) __builtin_msa_addv_w((v4i32) ypels, (v4i32) xpels);
+				ypels = __builtin_msa_addv_w(ypels, xpels);
 
-				// check if the values exceed boundary and clamp it to boundary
-				int32_t epi32[4] = {pSrcImage[((int32_t *) &ypels)[0]], pSrcImage[((int32_t *) &ypels)[1]], pSrcImage[((int32_t *) &ypels)[2]], pSrcImage[((int32_t *) &ypels)[3]]};
-				xpels = (v4u32) __builtin_msa_ld_w((void *) &epi32, 0);;
+				// maddv is not used due to bug in gcc version 8.2.0 (Debian 8.2.0-14)
+				// in this gcc version the order of the parameters is wrong
+				// ypels = (v4u32) __builtin_msa_maddv_w( (v4i32) xpels, src_s, (v4i32) ypels);
 
-				// convert to unsigned char and write to dst
-				xpels = (v4u32)__builtin_msa_sat_u_h((v8u16) xpels, 15);
-				xpels = (v4u32) __builtin_msa_pckev_h((v8i16) zeromask, (v8i16) xpels);
+				*dst++ = pSrcImage[ypels[0]];
+				*dst++ = pSrcImage[ypels[1]];
+				*dst++ = pSrcImage[ypels[2]];
+				*dst++ = pSrcImage[ypels[3]];
 
-				xpels = (v4u32)__builtin_msa_sat_u_h((v8u16) xpels, 7);
-				xpels = (v4u32) __builtin_msa_pckev_b(zeromask, (v16i8) xpels);
-
-				*dst++ = ((int32_t *) &xpels)[0];
 				x += 4;
 #else	// C
 				vx_float32 xmap = r00_x[x] + yC1;
@@ -610,6 +595,229 @@ int HafCpu_WarpAffine_U8_U8_Nearest
 				vx_int32 ypels = (vx_int32) ymap * srcImageStrideInBytes + (vx_int32) xmap;
 
 				*dst++ = *((unsigned char *) &pSrcImage[ypels]);
+				x += 1;
+#endif
+			}
+			y++;
+			pDstImage += dstImageStrideInBytes;
+		}
+	}
+	return AGO_SUCCESS;
+}
+
+int HafCpu_WarpAffine_U8_U8_Nearest_Constant
+	(
+		vx_uint32	     dstWidth,
+		vx_uint32	     dstHeight,
+		vx_uint8	   * pDstImage,
+		vx_uint32	     dstImageStrideInBytes,
+		vx_uint32	     srcWidth,
+		vx_uint32	     srcHeight,
+		vx_uint8	   * pSrcImage,
+		vx_uint32	     srcImageStrideInBytes,
+		ago_affine_matrix_t * matrix,
+		vx_uint8	     border,
+		vx_uint8	   * pLocalData
+	)
+{
+	const float r00 = matrix->matrix[0][0];
+	const float r10 = matrix->matrix[0][1];
+	const float r01 = matrix->matrix[1][0];
+	const float r11 = matrix->matrix[1][1];
+	const float const1 = matrix->matrix[2][0];
+	const float const2 = matrix->matrix[2][1];
+	const unsigned int u32_border = border | (border << 8) | (border << 16) | (border << 24);
+	int pb[4] = {(int) border, 0, 0, 0};
+
+#if ENABLE_MSA
+	v4f32 ymap, xmap, ydest, xdest;
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+	v16u8 ones = (v16u8) __builtin_msa_fill_b(1);
+
+	v4i32 sX = __builtin_msa_fill_w(srcWidth);
+	v4i32 sY = __builtin_msa_fill_w(srcHeight);
+
+	const v4f32 srcbx = __builtin_msa_ffint_s_w(sX);
+	const v4f32 srcby = __builtin_msa_ffint_s_w(sY);
+
+	v4i32 srcb = __builtin_msa_fill_w((srcHeight * srcImageStrideInBytes) - 1);
+	v4i32 src_s = __builtin_msa_fill_w(srcImageStrideInBytes);
+
+	v4i32 pborder = __builtin_msa_ld_w((void *) &pb, 0);
+	pborder = __builtin_msa_shf_w(pborder, 0);
+#endif
+
+	// check if all mapped pixels are valid or not
+	bool bBoder = (const1 < 0) | (const2 < 0) | (const1 >= srcWidth) | (const2 >= srcHeight);
+	// check for (dstWidth, 0)
+	float x1 = (r00 * dstWidth + const1);
+	float y1 = (r10 * dstWidth + const2);
+	bBoder |= (x1 < 0) | (y1 < 0) | (x1 >= srcWidth) | (y1 >= srcHeight);
+	// check for (0, dstHeight)
+	x1 = (r01 * dstHeight + const1);
+	y1 = (r11 * dstHeight + const2);
+	bBoder |= (x1 < 0) | (y1 < 0) | (x1 >= srcWidth) | (y1 >= srcHeight);
+	// check for (dstWidth, dstHeight)
+	x1 = (r00 * dstWidth + r01 * dstHeight + const1);
+	y1 = (r10 * dstWidth + r11 * dstHeight + const2);
+	bBoder |= (x1 < 0) | (y1 < 0) | (x1 >= srcWidth) | (y1 >= srcHeight);
+
+	unsigned int x, y;
+	float *r00_x = (float*) pLocalData;
+	float *r10_x = r00_x + dstWidth;
+	for (x = 0; x < dstWidth; x++)
+	{
+		r00_x[x] = r00 * x;
+		r10_x[x] = r10 * x;
+	}
+	y = 0;
+
+	if (bBoder){
+		while (y < dstHeight)
+		{
+			unsigned int x = 0;
+			vx_float32 yC1 = y * r01 + const1;
+			vx_float32 yC2 = y * r11 + const2;
+
+#if ENABLE_MSA
+			unsigned int *dst = (unsigned int *) pDstImage;
+
+			xdest = (v4f32){yC1, yC1, yC1, yC1};
+			ydest = (v4f32){yC2, yC2, yC2, yC2};
+#else
+			unsigned char *dst = (unsigned char *) pDstImage;
+#endif
+			while (x < dstWidth)
+			{
+#if ENABLE_MSA
+				v4i32 xpels, ypels;
+				// read x into xpel
+				xmap = (v4f32) __builtin_msa_ld_w((void *) &r00_x[x], 0);
+				// xf = dst[x3, x2, x1, x0]
+				xmap = __builtin_msa_fadd_w(xmap, xdest);
+				ymap = (v4f32) __builtin_msa_ld_w((void *) &r10_x[x], 0);
+				// ymap <- r10*x + ty
+				ymap = __builtin_msa_fadd_w(ymap, ydest);
+
+				v16u8 mask = (v16u8) __builtin_msa_fcle_w((v4f32) {0,0,0,0}, xmap);
+				v16u8 fclt = (v16u8) __builtin_msa_fclt_w(xmap, srcbx);
+				mask = __builtin_msa_and_v(mask, fclt);
+
+				fclt = (v16u8) __builtin_msa_fclt_w((v4f32) zeromask, ymap);
+				mask = __builtin_msa_and_v(mask, fclt);
+
+				fclt = (v16u8) __builtin_msa_fclt_w(ymap, srcby);
+				mask = __builtin_msa_and_v(mask, fclt);
+
+				// convert to integer with rounding towards zero
+				xpels = __builtin_msa_ftrunc_s_w(xmap);
+				ypels = __builtin_msa_ftrunc_s_w(ymap);
+
+				ypels = __builtin_msa_mulv_w(ypels, src_s);
+				// pixel location at src for dst image.
+				ypels = __builtin_msa_addv_w(ypels, xpels);
+
+				// maddv is not used due to bug in gcc version 8.2.0 (Debian 8.2.0-14)
+				// in this gcc version the order of the parameters is wrong
+				// ypels = (v4u32) __builtin_msa_maddv_w( (v4i32) xpels, src_s, (v4i32) ypels);
+
+				// check if the values exceed boundary and clamp it to boundary :: need to do this to avoid memory access violations
+				ypels = __builtin_msa_min_s_w(ypels, srcb);
+
+				// check if the values exceed boundary and clamp it to boundary
+				xpels = (v4i32){pSrcImage[ypels[0]], pSrcImage[ypels[1]], pSrcImage[ypels[2]], pSrcImage[ypels[3]]};
+
+				// mask for boundary: boundary pixels will substituted with xero
+				xpels = (v4i32) __builtin_msa_and_v((v16u8) xpels, mask);
+
+				// combined result
+				v16u8 temp = __builtin_msa_nor_v((v16u8) mask, (v16u8) mask);
+				temp = __builtin_msa_and_v(temp, (v16u8) pborder);
+				xpels = (v4i32) __builtin_msa_or_v((v16u8) xpels, temp);
+
+				// convert to unsigned char and write to dst
+				xpels = (v4i32) __builtin_msa_pckev_h((v8i16) zeromask, (v8i16) xpels);
+				xpels = (v4i32) __builtin_msa_pckev_b(zeromask, (v16i8) xpels);
+
+				*dst++ = __builtin_msa_copy_u_w(xpels, 0);
+
+				x += 4;
+#else	// C
+				vx_float32 xmap = r00_x[x] + yC1;
+				vx_float32 ymap = r10_x[x] + yC2;
+
+				vx_int32 mask = (FLT_MIN <= xmap ? INT32_MAX : INT32_MIN) & (xmap < (float) srcWidth ? INT32_MAX : INT32_MIN) &
+					(FLT_MIN < ymap ? INT32_MAX : INT32_MIN) & (ymap < (float) srcHeight ? INT32_MAX : INT32_MIN);
+
+				vx_int32 ypels = (vx_int32) ymap * srcImageStrideInBytes + (vx_int32) xmap;
+
+				ypels = (ypels < ((srcHeight * srcImageStrideInBytes) - 1)) ? ypels : ((srcHeight * srcImageStrideInBytes) - 1);
+				ypels = (ypels > 0) ? ypels : 0;
+
+				vx_int32 xpels = (pSrcImage[ypels] & mask) | (~mask & border);
+
+				unsigned short *pok = (unsigned short *) &xpels;
+				*dst++ = pok[0];
+				++x;
+#endif
+			}
+			y++;
+			pDstImage += dstImageStrideInBytes;
+		}
+	}
+	else
+	{
+		while (y < dstHeight)
+		{
+			unsigned int x = 0;
+			vx_float32 yC1 = y * r01 + const1;
+			vx_float32 yC2 = y * r11 + const2;
+
+#if ENABLE_MSA
+			// calculate (y*m[0][1] + m[0][2]) for x and y
+			xdest = (v4f32){yC1, yC1, yC1, yC1};
+			ydest = (v4f32){yC2, yC2, yC2, yC2};
+#endif
+			unsigned char *dst = (unsigned char *) pDstImage;
+
+			while (x < dstWidth)
+			{
+#if ENABLE_MSA
+				v4i32 xpels, ypels;
+				// read x into xpel
+				xmap = (v4f32) __builtin_msa_ld_w((void *) &r00_x[x], 0);
+				// xf = dst[x3, x2, x1, x0]
+				xmap = __builtin_msa_fadd_w(xmap, xdest);
+				ymap = (v4f32) __builtin_msa_ld_w((void *) &r10_x[x], 0);
+				// ymap <- r10*x + ty
+				ymap = __builtin_msa_fadd_w(ymap, ydest);
+
+				// convert to integer with rounding towards zero
+				xpels = __builtin_msa_ftrunc_s_w(xmap);
+				ypels = __builtin_msa_ftrunc_s_w(ymap);
+
+				ypels = __builtin_msa_mulv_w(ypels, src_s);
+				// pixel location at src for dst image.
+				ypels = __builtin_msa_addv_w(ypels, xpels);
+
+				// maddv is not used due to bug in gcc version 8.2.0 (Debian 8.2.0-14)
+				// in this gcc version the order of the parameters is wrong
+				// ypels = (v4u32) __builtin_msa_maddv_w( (v4i32) xpels, src_s, (v4i32) ypels);
+
+				*dst++ = pSrcImage[ypels[0]];
+				*dst++ = pSrcImage[ypels[1]];
+				*dst++ = pSrcImage[ypels[2]];
+				*dst++ = pSrcImage[ypels[3]];
+
+				x += 4;
+#else	 // C
+				vx_float32 xmap = r00_x[x] + yC1;
+				vx_float32 ymap = r10_x[x] + yC2;
+
+				vx_int32 ypels = (vx_int32) ymap * srcImageStrideInBytes + (vx_int32) xmap;
+
+				*dst++ = *((unsigned char *) &pSrcImage[ypels]);
+
 				x += 1;
 #endif
 			}
