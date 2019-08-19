@@ -3,6 +3,205 @@
 
 #define FP_BITS		18
 #define FP_MUL		(1 << FP_BITS)
+#define FP_ROUND    (1<<17)
+
+int HafCpu_ScaleImage_U8_U8_Area
+(
+vx_uint32            dstWidth,
+vx_uint32            dstHeight,
+vx_uint8           * pDstImage,
+vx_uint32            dstImageStrideInBytes,
+vx_uint32            srcWidth,
+vx_uint32            srcHeight,
+vx_uint8           * pSrcImage,
+vx_uint32            srcImageStrideInBytes,
+ago_scale_matrix_t * matrix
+)
+{
+	if (matrix->xscale == 1.0f && matrix->yscale == 1.0f)
+	{
+		vx_uint8 *pSrcB = pSrcImage + (dstHeight - 1) * srcImageStrideInBytes;
+		// no scaling. Just do a copy from src to dst
+		for (unsigned int y = 0; y < dstHeight; y++)
+		{
+			vx_uint8 *pSrc = pSrcImage + (int) (matrix->yoffset + y) * srcImageStrideInBytes + (int) matrix->xoffset;
+			// clamp to boundary
+			if (pSrc < pSrcImage) pSrc = pSrcImage;
+			if (pSrc > pSrcB) pSrc = pSrcB;
+			memcpy(pDstImage, pSrc, dstWidth);
+			pDstImage += dstImageStrideInBytes;
+		}
+	}
+	else if (matrix->xscale == 2.0f && matrix->yscale == 2.0f)
+	{
+#if ENABLE_MSA
+		v16i8 zero = __builtin_msa_ldi_b(0);
+		v8i16 delta2 = __builtin_msa_ldi_h(2);
+		v8i16 masklow = __builtin_msa_ldi_h(0x00ff);
+#endif
+		vx_uint8 *pSrcB = pSrcImage + (srcHeight - 2) * srcImageStrideInBytes;
+		// 2x2 image scaling
+		for (unsigned int y = 0; y < dstHeight; y++)
+		{
+			vx_uint8 *S0 = pSrcImage + (int) (matrix->yoffset + (y * 2)) * srcImageStrideInBytes + (int) (matrix->xoffset);
+			if (S0 < pSrcImage) S0 = pSrcImage;
+			if (S0 > pSrcB) S0 = pSrcB;
+			vx_uint8 *S1 = S0 + srcImageStrideInBytes;
+			vx_uint8 *D = pDstImage;
+
+#if ENABLE_MSA
+			for (unsigned int dx = 0; dx <= dstWidth - 8; dx += 8, S0 += 16, S1 += 16, D += 8)
+			{
+				v16i8 r0 = __builtin_msa_ld_b((void *) S0, 0);
+				v16i8 r1 = __builtin_msa_ld_b((void *) S1, 0);
+
+				v16i8 s0 = (v16i8) __builtin_msa_addv_h(__builtin_msa_srli_h((v8i16) r0, 8), (v8i16) __builtin_msa_and_v((v16u8) r0, (v16u8) masklow));
+				v16i8 s1 = (v16i8) __builtin_msa_addv_h(__builtin_msa_srli_h((v8i16) r1, 8), (v8i16) __builtin_msa_and_v((v16u8) r1, (v16u8) masklow));
+
+				s0 = (v16i8) __builtin_msa_addv_h(__builtin_msa_addv_h((v8i16) s0, (v8i16) s1), (v8i16) delta2);
+
+				v8u16 temp0_u = (v8u16)__builtin_msa_sat_u_b((v16u8) __builtin_msa_srli_h((v8i16) s0, 2), 7);
+				s0 = (v16i8) __builtin_msa_pckev_b(zero, (v16i8) temp0_u);
+
+				*(long long*) D = ((v2i64) s0)[0];
+			}
+#else
+			for (unsigned int dx = 0; dx <= dstWidth - 1; dx++, S0++, S1++, D++)
+			{
+				unsigned short r0 = ((unsigned short *) &S0[dx])[0];
+				unsigned short r1 = ((unsigned short *) &S1[dx])[0];
+
+				unsigned short s0 = (r0 >> 8) + (r0 & 255);
+				unsigned short s1 = (r1 >> 8) + (r1 & 255);
+
+				s0 = s0 + s1 + 2;
+
+				unsigned char t = (unsigned char) max(min((s0 >> 2), UINT8_MAX), 0);
+
+				*(char*) D = (char) t;
+			}
+#endif
+			pDstImage += dstImageStrideInBytes;
+		}
+	}
+	else
+	{
+		int xinc, yinc, xoffs, yoffs, xpos, ypos, x, y;
+
+		// Intermideate buffers to store results between horizontally filtered rows
+		int alignWidth = (dstWidth + 15) & ~15;
+		vx_uint16 *Xmap = (unsigned short *) ((vx_uint8 *) matrix + sizeof(ago_scale_matrix_t));
+		vx_uint16 *Ymap = Xmap + alignWidth + 8;
+#if ENABLE_MSA
+		v16i8 z = __builtin_msa_ldi_b(0);
+#endif
+
+		// do generic area scaling
+
+		// to convert to fixed point
+		yinc = (int) (FP_MUL * matrix->yscale);
+		xinc = (int) (FP_MUL * matrix->xscale);
+
+		// to convert to fixed point
+		yoffs = (int) (FP_MUL * matrix->yoffset);
+		xoffs = (int) (FP_MUL * matrix->xoffset);
+
+		int xscale = (int) (matrix->xscale + 0.5);
+		int yscale = (int) (matrix->yscale + 0.5);
+		float inv_scale = 1.0f / (xscale * yscale);
+		int area_div = (int) (FP_MUL * inv_scale);
+		vx_uint8 *src_b = pSrcImage + srcWidth * (srcHeight - 1);
+		//int area_sz = (area + (1 << (FP_BITS - 1))) >> FP_BITS;
+
+		// generate xmap;
+		for (x = 0, xpos = xoffs; x <= (int) dstWidth; x++, xpos += xinc)
+		{
+			int xmap;
+			xmap = ((xpos + FP_ROUND) >> FP_BITS);
+			if (xmap >(int) (srcWidth - 1))
+			{
+				xmap = (srcWidth - 1);
+			}
+			if (xmap < 0) xmap = 0;
+			Xmap[x] = (unsigned short) xmap;
+		}
+		for (y = 0, ypos = yoffs; y < (int) dstHeight; y++, ypos += yinc)
+		{
+			int ymap;
+			ymap = ((ypos + FP_ROUND )>> FP_BITS);
+			if (ymap >(int) (srcHeight - 1)){
+				ymap = srcHeight - 1;
+			}
+			if (ymap < 0) ymap = 0;
+
+			// compute vertical sum and store in intermediate buffer
+			vx_uint8 *S0 = pSrcImage + (int) ymap * srcImageStrideInBytes;
+			vx_uint8 *D = pDstImage;
+
+#if ENABLE_MSA
+			for (x = Xmap[0]; x <= (Xmap[dstWidth] - 7); x += 8)
+			{
+				v16i8 r0 = __builtin_msa_ilvr_b(z, __builtin_msa_ld_b((void *) (S0 + x), 0));
+				vx_uint8 *S1 = S0 + srcImageStrideInBytes;
+				for (int i = 1; i < yscale; i++)
+				{
+					if (S1 > src_b)
+						S1 = src_b;
+					v16i8 r1 = __builtin_msa_ilvr_b(z, __builtin_msa_ld_b((void *) (S1 + x), 0));
+					r0 = (v16i8) __builtin_msa_addv_h((v8i16) r0, (v8i16) r1);
+					S1 += srcImageStrideInBytes;
+				}
+				__builtin_msa_st_b(r0, (void *) &Ymap[x], 0);
+			}
+			// do horizontal scaling on intermediate buffer
+			for (x = 0; x < (int) dstWidth; x++)
+			{
+				int x0 = Xmap[x];
+				int x1 = x0 + xscale;
+				int sum = Ymap[x0];
+				while(++x0 < x1)
+				{
+					sum += Ymap[x0];
+				};
+				// divide sum by area and copy to dest
+				*D++ = (vx_uint8) (((sum * area_div) + (1 << 15)) >> FP_BITS);
+
+			}
+#else
+			for (x = Xmap[0]; x <= Xmap[dstWidth]; x++)
+			{
+				int r0 = S0[x];
+				vx_uint8 *S1 = S0 + srcImageStrideInBytes;
+				for (int i = 1; i < yscale; i++){
+					if (S1 > src_b)
+						S1 = src_b;
+					int r1 = S1[x];
+					r0 += r1;
+					S1 += srcImageStrideInBytes;
+				}
+				Ymap[x] = r0;
+			}
+
+			// do horizontal scaling on intermediate buffer
+			for (x = 0; x < (int) dstWidth; x++)
+			{
+				int x0 = Xmap[x];
+				int x1 = x0 + xscale;
+				int sum = Ymap[x0];
+				while(++x0 < x1)
+				{
+					sum += Ymap[x0];
+				};
+				// divide sum by area and copy to dest
+				*D++ = (vx_uint8) (((sum * area_div) + (1 << 15)) >> FP_BITS);
+
+			}
+#endif
+			pDstImage += dstImageStrideInBytes;
+		}
+	}
+	return AGO_SUCCESS;
+}
 
 int HafCpu_ScaleImage_U8_U8_Bilinear
 	(
