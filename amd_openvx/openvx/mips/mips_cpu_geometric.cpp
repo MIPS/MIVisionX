@@ -292,6 +292,11 @@ int HafCpu_ScaleImage_U8_U8_Bilinear
 			// mapped table [srcx7...src_x3, src_x2, src_x1, src_x0]
 			mapxy = __builtin_msa_ld_h((void *) &Xmap[x], 0);
 
+/*
+	On ISAs older then r6 accessing 2B (unsigned short) will cause unaligned access.
+	For this function unaligned access was heavily affecting the performance,
+	so workaround was developed to use read 1B at the time and then combine it to short.
+*/
 #if __mips_isa_rev < 6
 			v16u8 pp1r = (v16u8) pp1;
 			v16u8 pp2r = (v16u8) pp2;
@@ -474,6 +479,11 @@ vx_uint8             border
 			// mapped table [srcx7...src_x3,src_x2,src_x1,src_x0]
 			mapxy = __builtin_msa_ld_h((void *) &Xmap[x], 0);
 
+/*
+	On ISAs older then r6 accessing 2B (unsigned short) will cause unaligned access.
+	For this function unaligned access was heavily affecting the performance,
+	so workaround was developed to use read 1B at the time and then combine it to short.
+*/
 #if __mips_isa_rev < 6
 			v16u8 pp1r = (v16u8) pp1;
 			v16u8 pp2r = (v16u8) pp2;
@@ -581,6 +591,227 @@ vx_uint8             border
 			p2 = border;
 			p3 = pSrc2[0];
 			pDstImage[0] = ((One_min_xf[0] * one_min_yf * p0) + (Xfrac[0] * one_min_yf * p1) + (One_min_xf[0] * yf * p2) + (Xfrac[0] * yf * p3) + 0x8000) >> 16;
+		}
+#endif
+		pDstImage += dstImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
+
+int HafCpu_ScaleImage_U8_U8_Bilinear_Replicate
+(
+vx_uint32            dstWidth,
+vx_uint32            dstHeight,
+vx_uint8           * pDstImage,
+vx_uint32            dstImageStrideInBytes,
+vx_uint32            srcWidth,
+vx_uint32            srcHeight,
+vx_uint8           * pSrcImage,
+vx_uint32            srcImageStrideInBytes,
+ago_scale_matrix_t * matrix
+)
+{
+	int xinc, yinc, xoffs, yoffs;
+	unsigned char *pdst = pDstImage;
+
+	// to convert to fixed point
+	yinc = (int) (FP_MUL * matrix->yscale);
+	xinc = (int) (FP_MUL * matrix->xscale);
+
+	// to convert to fixed point
+	yoffs = (int) (FP_MUL * matrix->yoffset);
+	xoffs = (int) (FP_MUL * matrix->xoffset);
+
+	int alignW = (dstWidth + 15) & ~15;
+
+	unsigned short *Xmap = (unsigned short *) ((vx_uint8 *) matrix + sizeof(AgoConfigScaleMatrix));
+	unsigned short *Xfrac = Xmap + alignW;
+	unsigned short *One_min_xf = Xfrac + alignW;
+
+	int xpos = xoffs;
+	vx_uint32 newDstWidth = 0;
+
+	for (unsigned int x = 0; x < dstWidth; x++, xpos += xinc)
+	{
+		int xf;
+		int xmap = (xpos >> FP_BITS);
+		if (xmap >= (int) (srcWidth - 1)){
+			if (!newDstWidth)
+				newDstWidth = x - 1;
+			Xmap[x] = (unsigned short) (srcWidth - 1);
+		}
+		else {
+			Xmap[x] = (xmap < 0) ? 0 : (unsigned short) xmap;
+		}
+		xf = ((xpos & 0x3ffff) + 0x200) >> 10;
+		Xfrac[x] = xf;
+		One_min_xf[x] = (0x100 - xf);
+	}
+	if (dstWidth & 7)
+	{
+		// nearest multiple of 8
+		newDstWidth &= ~7;
+	}
+
+#if ENABLE_MSA
+	v8i16 pp1, pp2;
+	v8i16 mask = __builtin_msa_ldi_h((short) 0xff);
+	v8i16 round = __builtin_msa_ldi_h((short) 0x80);
+#endif
+	for (int y = 0, ypos = yoffs; y < (int) dstHeight; y++, ypos += yinc)
+	{
+		unsigned int x = 0;
+		int ym, yf, one_min_yf;
+		unsigned int yoffs;
+		vx_uint8 *pSrc1, *pSrc2;
+
+		ym = (ypos >> FP_BITS);
+		yf = ((ypos & 0x3ffff) + 0x200) >> 10;
+		one_min_yf = (0x100 - yf);
+		yoffs = ym * srcImageStrideInBytes;
+		if (ym < 0)
+		{
+			ym = yoffs = 0;
+			pSrc1 = pSrc2 = pSrcImage;
+		}
+		else if (ym >= (int) (srcHeight - 1))
+		{
+			ym = srcHeight - 1;
+			pSrc1 = pSrc2 = pSrcImage + ym * srcImageStrideInBytes;
+		}
+		else
+		{
+			pSrc1 = pSrcImage + ym * srcImageStrideInBytes;
+			pSrc2 = pSrc1 + srcImageStrideInBytes;
+		}
+#if ENABLE_MSA
+		v8i16 rmsa0, rmsa7;
+		rmsa0 = __builtin_msa_fill_h((unsigned short) one_min_yf);
+		rmsa7 = __builtin_msa_fill_h((unsigned short) yf);
+
+		for (; x < newDstWidth; x += 8)
+		{
+			v8i16 mapxy, rmsa1, rmsa2, rmsa3, rmsa4;
+
+			// mapped table [srcx7...src_x3,src_x2,src_x1,src_x0]
+			mapxy = __builtin_msa_ld_h((void *) &Xmap[x], 0);
+
+/*
+	On ISAs older then r6 accessing 2B (unsigned short) will cause unaligned access.
+	For this function unaligned access was heavily affecting the performance,
+	so workaround was developed to use read 1B at the time and then combine it to short.
+*/
+#if __mips_isa_rev < 6
+			v16u8 pp1r = (v16u8) pp1;
+			v16u8 pp2r = (v16u8) pp2;
+#endif
+			// load pixels for mapxy
+			for (int xx = 0; xx < 8; xx++)
+			{
+#if __mips_isa_rev < 6
+				unsigned char temp1 = ((unsigned char *) &pSrc1[((int16_t *) &mapxy)[xx]])[0];
+				unsigned char temp2 = ((unsigned char *) &pSrc1[((int16_t *) &mapxy)[xx]])[1];
+				pp1r[2 * xx] = temp1;
+				pp1r[2 * xx + 1] = temp2;
+
+				temp1 = ((unsigned char *) &pSrc2[((int16_t *) &mapxy)[xx]])[0];
+				temp2 = ((unsigned char *) &pSrc2[((int16_t *) &mapxy)[xx]])[1];
+				pp2r[2 * xx] = temp1;
+				pp2r[2 * xx + 1] = temp2;
+#else
+				pp1[xx] = ((unsigned short *) &pSrc1[((int16_t *) &mapxy)[xx]])[0];
+				pp2[xx] = ((unsigned short *) &pSrc2[((int16_t *) &mapxy)[xx]])[0];
+#endif
+			}
+#if __mips_isa_rev < 6
+			pp1 = (v8i16) pp1r;
+			pp2 = (v8i16) pp2r;
+#endif
+			// unpack src for p1 and p2
+			rmsa1 = (v8i16) __builtin_msa_and_v((v16u8) pp1, (v16u8) mask);
+			pp1 = __builtin_msa_srli_h(pp1, 8);
+
+			// unpack pp2 for p3 and p4
+			rmsa4 = (v8i16) __builtin_msa_and_v((v16u8) pp2, (v16u8) mask);
+			pp2 = __builtin_msa_srli_h(pp2, 8);
+
+			// load xf and 1-xf
+			rmsa2 = __builtin_msa_ld_h((void *) &Xfrac[x], 0);
+			rmsa3 = __builtin_msa_ld_h((void *) &One_min_xf[x], 0);
+
+			// t1 = (unsigned char) ((ione_minus_x *p1 + ifraction_x *p2) >> FW_WEIGHT);
+			rmsa1 = __builtin_msa_mulv_h(rmsa1, rmsa3);
+			pp1 = __builtin_msa_mulv_h(pp1, rmsa2);
+			rmsa1 = __builtin_msa_addv_h(rmsa1, pp1);
+			rmsa1 = __builtin_msa_addv_h(rmsa1, round);
+			rmsa1 = __builtin_msa_srli_h(rmsa1, 8);
+
+			// t2 = (unsigned char) ((ione_minus_x *p3 + ifraction_x *p4) >> FW_WEIGHT);
+			rmsa4 = __builtin_msa_mulv_h(rmsa4, rmsa3);
+			pp2 = __builtin_msa_mulv_h(pp2, rmsa2);
+			rmsa4 = __builtin_msa_addv_h(rmsa4, pp2);
+			rmsa4 = __builtin_msa_addv_h(rmsa4, round);
+			rmsa4 = __builtin_msa_srli_h(rmsa4, 8);
+
+			// *(pDst + x + y*dstStep) = (unsigned char) ((ione_minus_y *t1 + ifraction_y * t2) >> FW_WEIGHT)
+			rmsa1 = __builtin_msa_mulv_h(rmsa1, rmsa0);
+			rmsa4 = __builtin_msa_mulv_h(rmsa4, rmsa7);
+			rmsa1 = __builtin_msa_addv_h(rmsa1, rmsa4);
+			rmsa1 = __builtin_msa_addv_h(rmsa1, round);
+
+			rmsa1 = (v8i16) __builtin_msa_pckod_b((v16i8) rmsa1, (v16i8) rmsa1);
+
+			*(long long*) (pDstImage + x) = ((v2i64) rmsa1)[0];
+		}
+		// todo: if (upscale; recompute x=0, x=dwidth-1)
+		if (matrix->xscale < 1){
+			unsigned int p0, p1, p2, p3;
+			p0 = p1 = pSrc1[0];
+			p2 = p3 = pSrc2[0];
+			pDstImage[0] = ((One_min_xf[0] * one_min_yf * p0) +
+							(Xfrac[0] * one_min_yf * p1) +
+							(One_min_xf[0] * yf * p2) +
+							(Xfrac[0] * yf * p3) + 0x8000) >> 16;
+		}
+		x = newDstWidth;
+		while (x < dstWidth){
+			unsigned int p0, p1, p2, p3;
+			const unsigned char *p = pSrc1 + Xmap[x];
+			p0 = p[0];
+			p1 = (Xmap[x] < (srcWidth - 1)) ? p[1] : p0;
+			p = pSrc2 + Xmap[x];
+			p2 = p[0];
+			p3 = (Xmap[x] < (srcWidth - 1)) ? p[1]: p2;
+			pDstImage[x] = ((One_min_xf[x] * one_min_yf * p0) +
+							(Xfrac[x] * one_min_yf * p1) +
+							(One_min_xf[x] * yf * p2) +
+							(Xfrac[x] * yf * p3) + 0x8000) >> 16;
+			x++;
+		}
+#else
+		while (x < dstWidth){
+			unsigned int p0, p1, p2, p3;
+			const unsigned char *p = pSrc1 + Xmap[x];
+			p0 = p[0];
+			p1 = (Xmap[x] < (srcWidth - 1)) ? p[1] : p0;
+			p = pSrc2 + Xmap[x];
+			p2 = p[0];
+			p3 = (Xmap[x] < (srcWidth - 1)) ? p[1]: p2;
+			pDstImage[x] = ((One_min_xf[x] * one_min_yf * p0) +
+							(Xfrac[x] * one_min_yf * p1) +
+							(One_min_xf[x] * yf * p2) +
+							(Xfrac[x] * yf * p3) + 0x8000) >> 16;
+			x++;
+		}
+		// todo: if (upscale; recompute x=0, x=dwidth-1)
+		if (matrix->xscale < 1){
+			unsigned int p0, p1, p2, p3;
+			p0 = p1 = pSrc1[0];
+			p2 = p3 = pSrc2[0];
+			pDstImage[0] = ((One_min_xf[0] * one_min_yf * p0) +
+							(Xfrac[0] * one_min_yf * p1) +
+							(One_min_xf[0] * yf * p2) +
+							(Xfrac[0] * yf * p3) + 0x8000) >> 16;
 		}
 #endif
 		pDstImage += dstImageStrideInBytes;
