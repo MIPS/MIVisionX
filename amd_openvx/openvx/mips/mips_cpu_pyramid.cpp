@@ -1,6 +1,10 @@
 #include "ago_internal.h"
 #include "mips_internal.h"
 
+#define FP_BITS		16
+#define FP_MUL		(1<<FP_BITS)
+#define FP_ROUND	(1<<15)
+
 static inline unsigned short Horizontal5x5GaussianFilter_C
 	(
 		unsigned char * srcImage
@@ -19,7 +23,7 @@ static inline v8i16 Horizontal3x3GaussianFilter_SampleFirstPixel_MSA
 {
 	v8i16 shiftedL2, shiftedL1, row, shiftedR2, shiftedR1;
 	v8i16 resultH, resultL;
-	v16i8 zeromask =  __builtin_msa_ldi_b(0);
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
 
 	// load r[-2] and r[+2]
 	shiftedL2 = __builtin_msa_ld_h((v8u16 *) (srcImage - 2), 0);
@@ -34,7 +38,7 @@ static inline v8i16 Horizontal3x3GaussianFilter_SampleFirstPixel_MSA
 	shiftedR2 = (v8i16) __builtin_msa_ilvr_b(zeromask, (v16i8) shiftedR2);
 
 	// load r[-1]
-    shiftedL1 = __builtin_msa_ld_h((v8u16 *) (srcImage - 1), 0);
+	shiftedL1 = __builtin_msa_ld_h((v8u16 *) (srcImage - 1), 0);
 
 	// r[-2] + r[2]
 	resultH = __builtin_msa_addv_h(resultH, shiftedL2);
@@ -44,23 +48,23 @@ static inline v8i16 Horizontal3x3GaussianFilter_SampleFirstPixel_MSA
 	shiftedR1 = __builtin_msa_ld_h((v8u16 *) (srcImage + 1), 0);
 
 	// interleave r[-1]
-    shiftedL2 = (v8i16) __builtin_msa_ilvl_b(zeromask, (v16i8) shiftedL1);
-    shiftedL1 = (v8i16) __builtin_msa_ilvr_b(zeromask, (v16i8) shiftedL1);
+	shiftedL2 = (v8i16) __builtin_msa_ilvl_b(zeromask, (v16i8) shiftedL1);
+	shiftedL1 = (v8i16) __builtin_msa_ilvr_b(zeromask, (v16i8) shiftedL1);
 
 	// laod [r0]
 	row = __builtin_msa_ld_h((v8u16 *) (srcImage), 0);
 
 	// interleave r[+1]
-	shiftedR2 =  (v8i16) __builtin_msa_ilvl_b(zeromask, (v16i8) shiftedR1);
-	shiftedR1 =  (v8i16) __builtin_msa_ilvr_b(zeromask, (v16i8) shiftedR1);
+	shiftedR2 = (v8i16) __builtin_msa_ilvl_b(zeromask, (v16i8) shiftedR1);
+	shiftedR1 = (v8i16) __builtin_msa_ilvr_b(zeromask, (v16i8) shiftedR1);
 
 	// r[-1] + r[1]
 	shiftedL2 = __builtin_msa_addv_h(shiftedL2, shiftedR2);
 	shiftedL1 = __builtin_msa_addv_h(shiftedL1, shiftedR1);
 
 	// interleave [r0]
-	shiftedR1 =  (v8i16) __builtin_msa_ilvl_b(zeromask, (v16i8) row);
-	row =  (v8i16) __builtin_msa_ilvr_b(zeromask, (v16i8) row);
+	shiftedR1 = (v8i16) __builtin_msa_ilvl_b(zeromask, (v16i8) row);
+	row = (v8i16) __builtin_msa_ilvr_b(zeromask, (v16i8) row);
 
 	// r[-1] + r[1] + r[0]
 	shiftedL2 = __builtin_msa_addv_h(shiftedL2, shiftedR1);
@@ -322,6 +326,171 @@ int HafCpu_ScaleGaussianHalf_U8_U8_5x5
 		pSrcImage += (srcImageStrideInBytes + srcImageStrideInBytes);
 		pDstImage += dstImageStrideInBytes;
 		height--;
+	}
+	return AGO_SUCCESS;
+}
+
+// The kernel does a gaussian blur followed by ORB scaling
+
+/* Gaussian Kernel			1   4   6   4   1			1		1   4   6   4   1
+							4  16  24  16   4			4
+					1/256	6  24  36  24   6    =		6									>> 8
+							4  16  24  16   4			4
+							1   4   6   4   1			1
+*/
+int HafCpu_ScaleGaussianOrb_U8_U8_5x5
+(
+	vx_uint32     dstWidth,
+	vx_uint32     dstHeight,
+	vx_uint8    * pDstImage,
+	vx_uint32     dstImageStrideInBytes,
+	vx_uint8    * pSrcImage,
+	vx_uint32     srcImageStrideInBytes,
+	vx_uint32     srcWidth,
+	vx_uint32     srcHeight,
+	vx_uint8    * pLocalData
+	)
+{
+	int xpos, ypos, x;
+	// need to recalculate scale_factor because they might differ from
+	// global scale_factor for different pyramid levels.
+	float xcale = (float) srcWidth / dstWidth;
+	float yscale = (float) srcHeight / (dstHeight + 4);
+
+	// to convert to fixed point
+	int xinc = (int) (FP_MUL * xcale);
+	int yinc = (int) (FP_MUL * yscale);
+
+	unsigned short *Xmap = (unsigned short *) pLocalData;
+	unsigned short *r0 = (Xmap + ((dstWidth + 15) & ~15));
+	vx_uint8 *r1 = (vx_uint8 *) (r0 + ((srcWidth & 15) & ~15));
+
+#if ENABLE_MSA
+	v16i8 z = __builtin_msa_ldi_b(0);
+	v8i16 c6 = __builtin_msa_ldi_h(6);
+#endif
+
+	// generate xmap for orbit scaling
+	// generate xmap;
+	xpos = (int) (0.5f * xinc);
+	for (x = 0; x < (int) dstWidth; x++, xpos += xinc)
+	{
+		int xmap;
+		xmap = (xpos >> FP_BITS);
+		Xmap[x] = (unsigned short) xmap;
+	}
+
+	//starting from row 2 of dstimage
+	ypos = (int) ((2.5f) * yinc);
+
+	// do gaussian verical filter for ypos
+	for (int y = 0; y < (int) dstHeight; y++, ypos += yinc)
+	{
+		unsigned int x;
+		unsigned int *pdst = (unsigned int *) pDstImage;
+		const vx_uint8 *pSrc = pSrcImage + (ypos >> FP_BITS) * srcImageStrideInBytes;
+		const vx_uint8 *srow0 = pSrc - 2 * srcImageStrideInBytes;
+		const vx_uint8 *srow1 = pSrc - srcImageStrideInBytes;
+		const vx_uint8 *srow2 = pSrc + srcImageStrideInBytes;
+		const vx_uint8 *srow3 = pSrc + 2 * srcImageStrideInBytes;
+
+#if ENABLE_MSA
+		// do vertical convolution
+		for (x = 0; x < srcWidth; x += 16)
+		{
+			v16i8 s0 = __builtin_msa_ld_b((v8u16 *) (srow0 + x), 0);
+			v16i8 s1 = __builtin_msa_ld_b((v8u16 *) (srow1 + x), 0);
+			v16i8 s2 = __builtin_msa_ld_b((v8u16 *) (pSrc + x), 0);
+			v16i8 s3 = __builtin_msa_ld_b((v8u16 *) (srow2 + x), 0);
+			v16i8 s4 = __builtin_msa_ld_b((v8u16 *) (srow3 + x), 0);
+
+			v16i8 s0_L = __builtin_msa_ilvr_b(z, s0);
+			v16i8 s4_L = __builtin_msa_ilvr_b(z, s4);
+
+			s0 = __builtin_msa_ilvl_b(z, s0);
+			s4 = __builtin_msa_ilvl_b(z, s4);
+
+			s0_L = (v16i8) __builtin_msa_addv_h((v8i16) s0_L, (v8i16) s4_L);
+			s0 = (v16i8) __builtin_msa_addv_h((v8i16) s0, (v8i16) s4);
+
+			v8i16 s1_L = __builtin_msa_addv_h((v8i16) __builtin_msa_ilvr_b(z, s1), (v8i16) __builtin_msa_ilvr_b(z, s3));
+			s1 = (v16i8) __builtin_msa_addv_h((v8i16) __builtin_msa_ilvl_b(z, s1), (v8i16) __builtin_msa_ilvl_b(z, s3));
+
+			s4_L = __builtin_msa_ilvr_b(z, s2);
+			s2 = __builtin_msa_ilvl_b(z, s2);
+
+			s0_L = (v16i8) __builtin_msa_addv_h((v8i16) s0_L, (v8i16) __builtin_msa_slli_h(s1_L, 2));
+			s0 = (v16i8) __builtin_msa_addv_h((v8i16) s0, (v8i16) __builtin_msa_slli_h((v8i16) s1, 2));
+
+			// low 8 filtered
+			s0_L = (v16i8) __builtin_msa_addv_h((v8i16) s0_L, (v8i16) __builtin_msa_mulv_h((v8i16) s4_L, c6));
+			// Hi 8 filtered.
+			s0 = (v16i8) __builtin_msa_addv_h((v8i16) s0, (v8i16) __builtin_msa_mulv_h((v8i16) s2, c6));
+
+			// copy to temp
+			__builtin_msa_st_h((v8i16) s0_L, (void *) (r0 + x), 0);
+			__builtin_msa_st_h((v8i16) s0, (void *) (r0 + x + 8), 0);
+		}
+
+		// do horizontal convolution and copy to r1
+		for (x = 0; x <srcWidth; x += 8)
+		{
+			v16i8 s0 = __builtin_msa_ld_b((v8u16 *) (r0 + x - 2), 0);
+			v16i8 s1 = __builtin_msa_ld_b((v8u16 *) (r0 + x - 1), 0);
+			v16i8 s2 = __builtin_msa_ld_b((v8u16 *) (r0 + x), 0);
+			v16i8 s3 = __builtin_msa_ld_b((v8u16 *) (r0 + x + 1), 0);
+			v16i8 s4 = __builtin_msa_ld_b((v8u16 *) (r0 + x + 2), 0);
+
+			s0 = (v16i8) __builtin_msa_addv_h((v8i16) s0, (v8i16) s4);
+			s1 = (v16i8) __builtin_msa_addv_h((v8i16) s1, (v8i16) s3);
+			s0 = (v16i8) __builtin_msa_addv_h((v8i16) s0, __builtin_msa_slli_h((v8i16) s1, 2));
+			s0 = (v16i8) __builtin_msa_addv_h((v8i16) s0, __builtin_msa_mulv_h((v8i16) s2, c6));
+
+			s0 = (v16i8) __builtin_msa_srli_h((v8i16) s0, 8);
+
+			v8u16 temp0_u = (v8u16)__builtin_msa_sat_u_b((v16u8) s0, 7);
+			s0 = (v16i8) __builtin_msa_pckev_b((v16i8) temp0_u, (v16i8) temp0_u);
+
+			*(long long*) (r1 + x) = ((v2i64) s0)[0];
+		}
+		// do NN scaling and copy to dst
+		for (x = 0; x <= dstWidth - 4; x += 4)
+		{
+			const unsigned short *xm = &Xmap[x];
+			*pdst++ = r1[xm[0]] | (r1[xm[1]] << 8) |
+				(r1[xm[2]] << 16) | (r1[xm[3]] << 24);
+		}
+		for (; x < dstWidth; x++)
+			pDstImage[x] = r1[Xmap[x]];
+#else // C
+		// do vertical convolution
+		for (x = 0; x < srcWidth; x += 1)
+		{
+			r0[x] = srow0[x] + srow3[x] + ((srow1[x] + srow2[x]) << 2) + 6 * pSrc[x];
+		}
+
+		// x = 0
+		r1[0] = (r0[2] + (r0[1] << 2) + 6 * r0[0]) >> 8;
+		// x = 1
+		r1[1] = (r0[3] + ((r0[0] + r0[2]) << 2) + 6 * r0[1]) >> 8;
+
+		// do horizontal convolution and copy to r1
+		for (x = 2; x < srcWidth; x += 1)
+		{
+			r1[x] = (r0[x - 2] + r0[x + 2] + ((r0[x - 1] + r0[x + 1]) << 2) + 6 * r0[x]) >> 8;
+		}
+
+		// do NN scaling and copy to dst
+		for (x = 0; x <= dstWidth - 4; x += 4)
+		{
+			const unsigned short *xm = &Xmap[x];
+			*pdst++ = r1[xm[0]] | (r1[xm[1]] << 8) |
+				(r1[xm[2]] << 16) | (r1[xm[3]] << 24);
+		}
+		for (; x < dstWidth; x++)
+			pDstImage[x] = r1[Xmap[x]];
+#endif
+		pDstImage += dstImageStrideInBytes;
 	}
 	return AGO_SUCCESS;
 }
