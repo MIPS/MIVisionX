@@ -122,21 +122,21 @@ int HafCpu_ChannelCombine_U16_U8U8
 		vx_uint32     srcImage1StrideInBytes
 	)
 {
+	int height = (int) dstHeight;
 	unsigned char *pLocalSrc0, *pLocalSrc1, *pLocalDst;
+
 #if ENABLE_MSA
+	int width;
 	v16u8 r0, r1, resultL, resultH;
 	v16u8 *pLocalSrc0_msa, *pLocalSrc1_msa, *pLocalDst_msa;
-	v16i8 zeromask = (v16i8) __builtin_msa_ldi_b(0);
 
 	int prefixWidth = intptr_t(pDstImage) & 15;
 	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+
 	// 32 pixels processed at a time in MSA loop
 	int postfixWidth = ((int) dstWidth - prefixWidth) & 31;
-	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
-
 #endif
 
-	int height = (int) dstHeight;
 	while (height)
 	{
 		pLocalSrc0 = (unsigned char *) pSrcImage0;
@@ -150,10 +150,11 @@ int HafCpu_ChannelCombine_U16_U8U8
 		}
 
 		// 16 byte pairs copied into dst at once
-		int width = (int) (dstWidth >> 4);
+		width = (int) (dstWidth >> 4);
 		pLocalSrc0_msa = (v16u8 *) pLocalSrc0;
 		pLocalSrc1_msa = (v16u8 *) pLocalSrc1;
 		pLocalDst_msa = (v16u8 *) pLocalDst;
+
 		while (width)
 		{
 			r0 = (v16u8) __builtin_msa_ld_b((void *) pLocalSrc0_msa++, 0);
@@ -168,6 +169,7 @@ int HafCpu_ChannelCombine_U16_U8U8
 		pLocalSrc0 = (unsigned char *) pLocalSrc0_msa;
 		pLocalSrc1 = (unsigned char *) pLocalSrc1_msa;
 		pLocalDst = (unsigned char *) pLocalDst_msa;
+
 		for (int x = 0; x < postfixWidth; x++)
 		{
 			*pLocalDst++ = *pLocalSrc0++;
@@ -471,11 +473,11 @@ int HafCpu_ChannelCombine_U32_U8U8U8U8_RGBX
 		vx_uint32     srcImage3StrideInBytes
 	)
 {
+	int width;
 	int height = (int) dstHeight;
 
 #if ENABLE_MSA
 	v16u8 r, g, b, x, pixels0, pixels1, pixels2;
-	v16i8 zeromask = (v16i8) __builtin_msa_ldi_b(0);
 
 	int alignedWidth = dstWidth & ~15;
 	int postfixWidth = (int) dstWidth - alignedWidth;
@@ -488,10 +490,10 @@ int HafCpu_ChannelCombine_U32_U8U8U8U8_RGBX
 		vx_uint8 * pLocalSrc2 = pSrcImage2;
 		vx_uint8 * pLocalSrc3 = pSrcImage3;
 		vx_uint8 * pLocalDst = pDstImage;
-		// Inner loop processess 16 pixels at a time
-		int width = (int) (dstWidth >> 4);
 
 #if ENABLE_MSA
+		// Inner loop processess 16 pixels at a time
+		width = (int) (dstWidth >> 4);
 		while (width)
 		{
 			r = (v16u8) __builtin_msa_ld_b((void *) pLocalSrc0, 0);
@@ -532,7 +534,7 @@ int HafCpu_ChannelCombine_U32_U8U8U8U8_RGBX
 			pLocalSrc3 += 16;
 		}
 
-		for (int width = 0; width < postfixWidth; width++)
+		for (width = 0; width < postfixWidth; width++)
 		{
 			*pLocalDst++ = *pLocalSrc0++;
 			*pLocalDst++ = *pLocalSrc1++;
@@ -540,7 +542,7 @@ int HafCpu_ChannelCombine_U32_U8U8U8U8_RGBX
 			*pLocalDst++ = *pLocalSrc3++;
 		}
 #else	// C
-		for (int width = 0; width < dstWidth; width++)
+		for (width = 0; width < dstWidth; width++)
 		{
 			*pLocalDst++ = *pLocalSrc0++;
 			*pLocalDst++ = *pLocalSrc1++;
@@ -673,14 +675,15 @@ int HafCpu_ChannelExtract_U8_U16_Pos0
 		vx_uint32     srcImageStrideInBytes
 	)
 {
+#if ENABLE_MSA
 	int alignedWidth = dstWidth & ~15;
 	int alignedTest = alignedWidth >> 4;
 	int postfixWidth = (int) dstWidth - alignedWidth;
 
-#if ENABLE_MSA
 	v16u8 *tbl;
 	v16u8 r0, r1;
 	v16u8 mask1, mask2;
+
 	if(alignedTest > 0)
 	{
 		tbl = (v16u8 *) dataChannelExtract;
@@ -740,6 +743,7 @@ int HafCpu_ChannelExtract_U8_U16_Pos1
 	int alignedWidth = dstWidth & ~15;
 	int alignedTest = alignedWidth >> 4;
 	int postfixWidth = (int) dstWidth - alignedWidth;
+
 	v16i8 r0, r1;
 #endif
 	for (int height = 0; height < (int) dstHeight; height++)
@@ -785,18 +789,19 @@ int HafCpu_ChannelExtract_U8_U24_Pos0
 		vx_uint32     srcImageStrideInBytes
 	)
 {
+	int width;
+	int height = (int) dstHeight;
+	unsigned char * pLocalSrc, *pLocalDst;
+
 #if ENABLE_MSA
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = (int) dstWidth - alignedWidth;
+
 	v16i8 r0, r1, r2;
 	v16i8 mask1 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 4), 0);
 	v16i8 mask2 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 5), 0);
 	v16i8 mask3 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 6), 0);
 #endif
-
-	int width;
-	int height = (int) dstHeight;
-	int alignedWidth = dstWidth & ~15;
-	int postfixWidth = (int) dstWidth - alignedWidth;
-	unsigned char * pLocalSrc, *pLocalDst;
 
 	while (height)
 	{
@@ -855,24 +860,26 @@ int HafCpu_ChannelExtract_U8_U24_Pos1
 		vx_uint32     srcImageStrideInBytes
 	)
 {
+	int width;
+	int height = (int) dstHeight;
+
+#if ENABLE_MSA
 	int alignedWidth = dstWidth & ~15;
 	int postfixWidth = (int) dstWidth - alignedWidth;
 
-#if ENABLE_MSA
 	v16i8 r0, r1, r2;
 	v16i8 mask1 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 7), 0);
 	v16i8 mask2 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 8), 0);
 	v16i8 mask3 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 9), 0);
 #endif
 
-	int height = (int) dstHeight;
 	while (height)
 	{
 		vx_uint8 * pLocalSrc = pSrcImage;
 		vx_uint8 * pLocalDst = pDstImage;
-		int width = alignedWidth >> 4;
 
 #if ENABLE_MSA
+		width = alignedWidth >> 4;
 		while (width)
 		{
 			r0 = __builtin_msa_ld_b((void *) pLocalSrc, 0);
@@ -927,24 +934,26 @@ int HafCpu_ChannelExtract_U8_U24_Pos2
 		vx_uint32     srcImageStrideInBytes
 	)
 {
+	int width;
+	int height = (int) dstHeight;
+
+#if ENABLE_MSA
 	int alignedWidth = dstWidth & ~15;
 	int postfixWidth = (int) dstWidth - alignedWidth;
 
-#if ENABLE_MSA
 	v16i8 r0, r1, r2;
 	v16i8 mask1 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 10), 0);
 	v16i8 mask2 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 11), 0);
 	v16i8 mask3 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 12), 0);
 #endif
 
-	int height = (int) dstHeight;
 	while (height)
 	{
 		vx_uint8 * pLocalSrc = pSrcImage;
 		vx_uint8 * pLocalDst = pDstImage;
-		int width = alignedWidth >> 4;
 
 #if ENABLE_MSA
+		width = alignedWidth >> 4;
 		while (width)
 		{
 			r0 = __builtin_msa_ld_b((void *) pLocalSrc, 0);
@@ -999,9 +1008,10 @@ int HafCpu_ChannelExtract_U8_U32_Pos0
 		vx_uint32     srcImageStrideInBytes
 	)
 {
+#if ENABLE_MSA
 	int alignedWidth = dstWidth & ~15;
 	int postfixWidth = (int) dstWidth - alignedWidth;
-#if ENABLE_MSA
+
 	v16i8 r0, r1, r2, r3;
 	v16i8 mask1 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 13), 0);
 	v16i8 mask2 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 14), 0);
@@ -1065,10 +1075,10 @@ int HafCpu_ChannelExtract_U8_U32_Pos1
 		vx_uint32     srcImageStrideInBytes
 	)
 {
+#if ENABLE_MSA
 	int alignedWidth = dstWidth & ~15;
 	int postfixWidth = (int) dstWidth - alignedWidth;
 
-#if ENABLE_MSA
 	v16i8 r0, r1, r2, r3;
 	v16i8 mask1 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 17), 0);
 	v16i8 mask2 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 18), 0);
@@ -1132,10 +1142,10 @@ int HafCpu_ChannelExtract_U8_U32_Pos2
 		vx_uint32     srcImageStrideInBytes
 	)
 {
+#if ENABLE_MSA
 	int alignedWidth = dstWidth & ~15;
 	int postfixWidth = (int) dstWidth - alignedWidth;
 
-#if ENABLE_MSA
 	v16i8 r0, r1, r2, r3;
 	v16i8 mask1 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 21), 0);
 	v16i8 mask2 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 22), 0);
@@ -1200,16 +1210,19 @@ int HafCpu_ChannelCopy_U8_U8
 		vx_uint32     srcImageStrideInBytes
 	)
 {
-	unsigned char *pLocalSrc, *pLocalDst;
+	int width;
 	int height = (int) dstHeight;
 
 #if ENABLE_MSA
 	v16u8 r0, r1;
+	unsigned char *pLocalSrc, *pLocalDst;
 	v16u8 *pLocalSrc_msa, *pLocalDst_msa;
 
 	int prefixWidth = intptr_t(pDstImage) & 15;
 	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
-	int postfixWidth = ((int) dstWidth - prefixWidth) & 31;					// 32 pixels processed at a time in MSA loop
+
+	// 32 pixels processed at a time in MSA loop
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 31;
 	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
 
 	while (height)
@@ -1220,7 +1233,8 @@ int HafCpu_ChannelCopy_U8_U8
 		for (int x = 0; x < prefixWidth; x++)
 			*pLocalDst++ = *pLocalSrc++;
 
-		int width = alignedWidth >> 5;									// 32 pixels copied at a time
+		// 32 pixels copied at a time
+		width = alignedWidth >> 5;
 		pLocalSrc_msa = (v16u8 *) pLocalSrc;
 		pLocalDst_msa = (v16u8 *) pLocalDst;
 		while (width)
@@ -1248,7 +1262,7 @@ int HafCpu_ChannelCopy_U8_U8
 	{
 		unsigned char *pLocalSrc = (unsigned char *) pSrcImage;
 		unsigned char *pLocalDst = (unsigned char *) pDstImage;
-		int width = (int) dstWidth;
+		width = (int) dstWidth;
 		while (width)
 		{
 			*pLocalDst++ = *pLocalSrc++;
