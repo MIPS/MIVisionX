@@ -51,6 +51,22 @@ DECL_ALIGN(16) unsigned char dataChannelCombine[16 * 15] ATTR_ALIGN(16) = {
 	255, 255, 255,	 0, 255, 255, 255,   1, 255, 255, 255,	 2, 255, 255, 255,   3,		// V into YUYV
 };
 
+/*
+Benchmarks shown that memcpy is faster then MSA implementation for most usecases.
+MSA implementation could be used and tuned to suit specific usecase,
+so we are providing it as well.
+*/
+int HafCpu_BinaryCopy_U8_U8
+	(
+		vx_size		size,
+		vx_uint8	  * pDstBuf,
+		vx_uint8	  * pSrcBuf
+	)
+{
+	memcpy(pDstBuf, pSrcBuf, size);
+	return AGO_SUCCESS;
+}
+/*
 int HafCpu_BinaryCopy_U8_U8
 	(
 		vx_size		size,
@@ -92,6 +108,7 @@ int HafCpu_BinaryCopy_U8_U8
 	}
 	return AGO_SUCCESS;
 }
+*/
 
 int HafCpu_ChannelCombine_U16_U8U8
 	(
