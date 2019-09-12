@@ -1200,6 +1200,72 @@ int HafCpu_ChannelExtract_U8_U32_Pos2
 	return AGO_SUCCESS;
 }
 
+int HafCpu_ChannelExtract_U8_U32_Pos3
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+#if ENABLE_MSA
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = (int) dstWidth - alignedWidth;
+
+	v16i8 r0, r1, r2, r3;
+	v16i8 mask1 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 25), 0);
+	v16i8 mask2 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 26), 0);
+	v16i8 mask3 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 27), 0);
+	v16i8 mask4 = __builtin_msa_ld_b((void *) (((v16i8 *) &dataChannelExtract) + 28), 0);
+#endif
+
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+		vx_uint8 * pLocalSrc = pSrcImage;
+		vx_uint8 * pLocalDst = pDstImage;
+#if ENABLE_MSA
+		for (int width = 0; width < (alignedWidth >> 4); width++)
+		{
+			r0 = __builtin_msa_ld_b((void *) pLocalSrc, 0);
+			r1 = __builtin_msa_ld_b((void *) (pLocalSrc + 16), 0);
+			r2 = __builtin_msa_ld_b((void *) (pLocalSrc + 32), 0);
+			r3 = __builtin_msa_ld_b((void *) (pLocalSrc + 48), 0);
+
+			r0 = __builtin_msa_vshf_b(mask1, r0, r0);
+			r1 = __builtin_msa_vshf_b(mask2, r1, r1);
+			r2 = __builtin_msa_vshf_b(mask3, r2, r2);
+			r3 = __builtin_msa_vshf_b(mask4, r3, r3);
+
+			r0 = (v16i8) __builtin_msa_or_v((v16u8) r0, (v16u8) r1);
+			r0 = (v16i8) __builtin_msa_or_v((v16u8) r0, (v16u8) r2);
+			r0 = (v16i8) __builtin_msa_or_v((v16u8) r0, (v16u8) r3);
+
+			__builtin_msa_st_b(r0, (void *) pLocalDst, 0);
+
+			pLocalSrc += 64;
+			pLocalDst += 16;
+		}
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			pLocalSrc += 3;
+			*pLocalDst++ = *pLocalSrc++;
+		}
+#else	// C
+		for (int width = 0; width < dstWidth; width++)
+		{
+			pLocalSrc += 3;
+			*pLocalDst++ = *pLocalSrc++;
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_ChannelCopy_U8_U8
 	(
 		vx_uint32     dstWidth,
