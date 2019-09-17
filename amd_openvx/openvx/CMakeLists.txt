@@ -54,7 +54,7 @@ if (BUILD_MIPS OR C_IMPL)
 		mips/mips_cpu_canny.cpp
 		mips/mips_cpu_ch_extract_combine.cpp
 		mips/mips_cpu_color_convert.cpp
-		ago/ago_haf_cpu_harris.cpp
+		mips/mips_cpu_harris.cpp
 		mips/mips_cpu_opticalflow.cpp
 		mips/mips_cpu_pyramid.cpp
 		mips/mips_cpu_filter.cpp
