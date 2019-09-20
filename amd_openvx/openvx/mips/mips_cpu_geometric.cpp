@@ -1044,16 +1044,16 @@ int HafCpu_ScaleUp2x2_U8_U8
 
 int HafCpu_WarpAffine_U8_U8_Bilinear
 	(
-		vx_uint32	      dstWidth,
-		vx_uint32	      dstHeight,
-		vx_uint8	    * pDstImage,
-		vx_uint32	      dstImageStrideInBytes,
-		vx_uint32	      srcWidth,
-		vx_uint32	      srcHeight,
-		vx_uint8	    * pSrcImage,
-		vx_uint32	      srcImageStrideInBytes,
+		vx_uint32		dstWidth,
+		vx_uint32		dstHeight,
+		vx_uint8		* pDstImage,
+		vx_uint32		dstImageStrideInBytes,
+		vx_uint32		srcWidth,
+		vx_uint32		srcHeight,
+		vx_uint8		* pSrcImage,
+		vx_uint32		srcImageStrideInBytes,
 		ago_affine_matrix_t * matrix,
-		vx_uint8	    * pLocalData
+		vx_uint8		* pLocalData
 	)
 {
 	// do backward mapping to find the (x, y) locations in source corresponding to (x', y') from dest by doing inverse matrix
@@ -1172,28 +1172,28 @@ int HafCpu_WarpAffine_U8_U8_Bilinear
 
 					// read pixels from src and re-arrange
 					psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 0);
-					((int8_t *) &p0)[0] = psrc[0];
-					((int8_t *) &p1)[0] = psrc[1];
-					((int8_t *) &p2)[0] = (psrc + srcImageStrideInBytes)[0];
-					((int8_t *) &p3)[0] = (psrc + srcImageStrideInBytes)[1];
+					p0[0] = psrc[0];
+					p1[0] = psrc[1];
+					p2[0] = (psrc + srcImageStrideInBytes)[0];
+					p3[0] = (psrc + srcImageStrideInBytes)[1];
 
 					psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 1);
-					((int8_t *) &p0)[4] = psrc[0];
-					((int8_t *) &p1)[4] = psrc[1];
-					((int8_t *) &p2)[4] = (psrc + srcImageStrideInBytes)[0];
-					((int8_t *) &p3)[4] = (psrc + srcImageStrideInBytes)[1];
+					p0[1] = psrc[0];
+					p1[1] = psrc[1];
+					p2[1] = (psrc + srcImageStrideInBytes)[0];
+					p3[1] = (psrc + srcImageStrideInBytes)[1];
 
 					psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 2);
-					((int8_t *) &p0)[8] = psrc[0];
-					((int8_t *) &p1)[8] = psrc[1];
-					((int8_t *) &p2)[8] = (psrc + srcImageStrideInBytes)[0];
-					((int8_t *) &p3)[8] = (psrc + srcImageStrideInBytes)[1];
+					p0[2] = psrc[0];
+					p1[2] = psrc[1];
+					p2[2] = (psrc + srcImageStrideInBytes)[0];
+					p3[2] = (psrc + srcImageStrideInBytes)[1];
 
 					psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 3);
-					((int8_t *) &p0)[12] = psrc[0];
-					((int8_t *) &p1)[12] = psrc[1];
-					((int8_t *) &p2)[12] = (psrc + srcImageStrideInBytes)[0];
-					((int8_t *) &p3)[12] = (psrc + srcImageStrideInBytes)[1];
+					p0[3] = psrc[0];
+					p1[3] = psrc[1];
+					p2[3] = (psrc + srcImageStrideInBytes)[0];
+					p3[3] = (psrc + srcImageStrideInBytes)[1];
 
 					p0_f = __builtin_msa_ffint_s_w(p0);
 					p1_f = __builtin_msa_ffint_s_w(p1);
@@ -1338,30 +1338,31 @@ int HafCpu_WarpAffine_U8_U8_Bilinear
 				one_minus_xFraction = __builtin_msa_fsub_w(onemask, xFraction);
 				one_minus_yFraction = __builtin_msa_fsub_w(onemask, yFraction);
 
+
 				// read pixels from src and re-arrange
 				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 0) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 0);
-				((int8_t *) &p0)[0] = psrc[0];
-				((int8_t *) &p1)[0] = psrc[1];
-				((int8_t *) &p2)[0] = (psrc + srcImageStrideInBytes)[0];
-				((int8_t *) &p3)[0] = (psrc + srcImageStrideInBytes)[1];
+				p0[0] = psrc[0];
+				p1[0] = psrc[1];
+				p2[0] = (psrc + srcImageStrideInBytes)[0];
+				p3[0] = (psrc + srcImageStrideInBytes)[1];
 
 				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 1) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 1);
-				((int8_t *) &p0)[4] = psrc[0];
-				((int8_t *) &p1)[4] = psrc[1];
-				((int8_t *) &p2)[4] = (psrc + srcImageStrideInBytes)[0];
-				((int8_t *) &p3)[4] = (psrc + srcImageStrideInBytes)[1];
+				p0[1] = psrc[0];
+				p1[1] = psrc[1];
+				p2[1] = (psrc + srcImageStrideInBytes)[0];
+				p3[1] = (psrc + srcImageStrideInBytes)[1];
 
 				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 2) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 2);
-				((int8_t *) &p0)[8] = psrc[0];
-				((int8_t *) &p1)[8] = psrc[1];
-				((int8_t *) &p2)[8] = (psrc + srcImageStrideInBytes)[0];
-				((int8_t *) &p3)[8] = (psrc + srcImageStrideInBytes)[1];
+				p0[2] = psrc[0];
+				p1[2] = psrc[1];
+				p2[2] = (psrc + srcImageStrideInBytes)[0];
+				p3[2] = (psrc + srcImageStrideInBytes)[1];
 
 				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 3) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 3);
-				((int8_t *) &p0)[12] = psrc[0];
-				((int8_t *) &p1)[12] = psrc[1];
-				((int8_t *) &p2)[12] = (psrc + srcImageStrideInBytes)[0];
-				((int8_t *) &p3)[12] = (psrc + srcImageStrideInBytes)[1];
+				p0[3] = psrc[0];
+				p1[3] = psrc[1];
+				p2[3] = (psrc + srcImageStrideInBytes)[0];
+				p3[3] = (psrc + srcImageStrideInBytes)[1];
 
 				p0_f = __builtin_msa_ffint_s_w(p0);
 				p1_f = __builtin_msa_ffint_s_w(p1);
@@ -1434,17 +1435,17 @@ int HafCpu_WarpAffine_U8_U8_Bilinear
 
 int HafCpu_WarpAffine_U8_U8_Bilinear_Constant
 	(
-		vx_uint32	      dstWidth,
-		vx_uint32	      dstHeight,
-		vx_uint8	    * pDstImage,
-		vx_uint32	      dstImageStrideInBytes,
-		vx_uint32	      srcWidth,
-		vx_uint32	      srcHeight,
-		vx_uint8	    * pSrcImage,
-		vx_uint32	      srcImageStrideInBytes,
+		vx_uint32		dstWidth,
+		vx_uint32		dstHeight,
+		vx_uint8		* pDstImage,
+		vx_uint32		dstImageStrideInBytes,
+		vx_uint32		srcWidth,
+		vx_uint32		srcHeight,
+		vx_uint8		* pSrcImage,
+		vx_uint32		srcImageStrideInBytes,
 		ago_affine_matrix_t * matrix,
-		vx_uint8	      border,
-		vx_uint8			* pLocalData
+		vx_uint8		border,
+		vx_uint8		* pLocalData
 	)
 {
 	// do backward mapping to find the (x, y) locations in source corresponding to (x', y') from dest by doing inverse matrix
@@ -1536,7 +1537,7 @@ int HafCpu_WarpAffine_U8_U8_Bilinear_Constant
 				mask = __builtin_msa_and_v(mask, fclt);
 
 				v4u32 m = (v4u32) __builtin_msa_xori_b((v16u8) mask, 255);
-				if( __builtin_msa_bz_w(m))
+				if ( __builtin_msa_bz_w(m))
 				{
 					// convert to integer with rounding towards zero
 					xint = __builtin_msa_ftrunc_s_w(xmap);
@@ -1561,29 +1562,29 @@ int HafCpu_WarpAffine_U8_U8_Bilinear_Constant
 					yint = __builtin_msa_max_s_w(yint, (v4i32) zeromask);
 
 					// read pixels from src and re-arrange
-			psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 0);
-			((int8_t *) &p0)[0] = psrc[0];
-			((int8_t *) &p1)[0] = psrc[1];
-			((int8_t *) &p2)[0] = (psrc + srcImageStrideInBytes)[0];
-			((int8_t *) &p3)[0] = (psrc + srcImageStrideInBytes)[1];
+					psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 0);
+					p0[0] = psrc[0];
+					p1[0] = psrc[1];
+					p2[0] = (psrc + srcImageStrideInBytes)[0];
+					p3[0] = (psrc + srcImageStrideInBytes)[1];
 
-			psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 1);
-			((int8_t *) &p0)[4] = psrc[0];
-			((int8_t *) &p1)[4] = psrc[1];
-			((int8_t *) &p2)[4] = (psrc + srcImageStrideInBytes)[0];
-			((int8_t *) &p3)[4] = (psrc + srcImageStrideInBytes)[1];
+					psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 1);
+					p0[1] = psrc[0];
+					p1[1] = psrc[1];
+					p2[1] = (psrc + srcImageStrideInBytes)[0];
+					p3[1] = (psrc + srcImageStrideInBytes)[1];
 
-			psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 2);
-			((int8_t *) &p0)[8] = psrc[0];
-			((int8_t *) &p1)[8] = psrc[1];
-			((int8_t *) &p2)[8] = (psrc + srcImageStrideInBytes)[0];
-			((int8_t *) &p3)[8] = (psrc + srcImageStrideInBytes)[1];
+					psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 2);
+					p0[2] = psrc[0];
+					p1[2] = psrc[1];
+					p2[2] = (psrc + srcImageStrideInBytes)[0];
+					p3[2] = (psrc + srcImageStrideInBytes)[1];
 
-			psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 3);
-			((int8_t *) &p0)[12] = psrc[0];
-			((int8_t *) &p1)[12] = psrc[1];
-			((int8_t *) &p2)[12] = (psrc + srcImageStrideInBytes)[0];
-			((int8_t *) &p3)[12] = (psrc + srcImageStrideInBytes)[1];
+					psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 3);
+					p0[3] = psrc[0];
+					p1[3] = psrc[1];
+					p2[3] = (psrc + srcImageStrideInBytes)[0];
+					p3[3] = (psrc + srcImageStrideInBytes)[1];
 
 					p0_f = __builtin_msa_ffint_s_w(p0);
 					p1_f = __builtin_msa_ffint_s_w(p1);
@@ -1628,14 +1629,14 @@ int HafCpu_WarpAffine_U8_U8_Bilinear_Constant
 				ymap = r10_x[x] + yC2;
 
 				int mask = ((r00_x[x] + yC1) >= 0 ? 1 : 0) & ((r00_x[x] + yC1) < srcWidth ? 1 : 0) &
-			((r10_x[x] + yC2) >= 0 ? 1 : 0) & ((r10_x[x] + yC2) < srcHeight ? 1 : 0);
+							((r10_x[x] + yC2) >= 0 ? 1 : 0) & ((r10_x[x] + yC2) < srcHeight ? 1 : 0);
 
-				if(mask){
+				if (mask) {
 					xint = (int) xmap;
 					yint = (int) ymap;
 
-					xFraction = xmap - (float ) xint;
-					yFraction = ymap - (float ) yint;
+					xFraction = xmap - (float) xint;
+					yFraction = ymap - (float) yint;
 
 					yint = yint * srcImageStrideInBytes + xint;
 
@@ -1648,9 +1649,9 @@ int HafCpu_WarpAffine_U8_U8_Bilinear_Constant
 					unsigned char *psrc = pSrcImage + yint;
 
 					p0 = (int) *(psrc);
-			p1 = (int) *(psrc + 1);
-			p2 = (int) *(psrc + srcImageStrideInBytes);
-			p3 = (int) *(psrc + srcImageStrideInBytes + 1);
+					p1 = (int) *(psrc + 1);
+					p2 = (int) *(psrc + srcImageStrideInBytes);
+					p3 = (int) *(psrc + srcImageStrideInBytes + 1);
 
 					p0_f = (float) p0;
 					p1_f = (float) p1;
@@ -1731,29 +1732,29 @@ int HafCpu_WarpAffine_U8_U8_Bilinear_Constant
 				one_minus_yFraction = __builtin_msa_fsub_w(onemask, yFraction);
 
 				// read pixels from src and re-arrange
-		psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 0) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 0);
-		((int8_t *) &p0)[0] = psrc[0];
-		((int8_t *) &p1)[0] = psrc[1];
-		((int8_t *) &p2)[0] = (psrc + srcImageStrideInBytes)[0];
-		((int8_t *) &p3)[0] = (psrc + srcImageStrideInBytes)[1];
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 0) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 0);
+				p0[0] = psrc[0];
+				p1[0] = psrc[1];
+				p2[0] = (psrc + srcImageStrideInBytes)[0];
+				p3[0] = (psrc + srcImageStrideInBytes)[1];
 
-		psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 1) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 1);
-		((int8_t *) &p0)[4] = psrc[0];
-		((int8_t *) &p1)[4] = psrc[1];
-		((int8_t *) &p2)[4] = (psrc + srcImageStrideInBytes)[0];
-		((int8_t *) &p3)[4] = (psrc + srcImageStrideInBytes)[1];
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 1) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 1);
+				p0[1] = psrc[0];
+				p1[1] = psrc[1];
+				p2[1] = (psrc + srcImageStrideInBytes)[0];
+				p3[1] = (psrc + srcImageStrideInBytes)[1];
 
-		psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 2) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 2);
-		((int8_t *) &p0)[8] = psrc[0];
-		((int8_t *) &p1)[8] = psrc[1];
-		((int8_t *) &p2)[8] = (psrc + srcImageStrideInBytes)[0];
-		((int8_t *) &p3)[8] = (psrc + srcImageStrideInBytes)[1];
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 2) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 2);
+				p0[2] = psrc[0];
+				p1[2] = psrc[1];
+				p2[2] = (psrc + srcImageStrideInBytes)[0];
+				p3[2] = (psrc + srcImageStrideInBytes)[1];
 
-		psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 3) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 3);
-		((int8_t *) &p0)[12] = psrc[0];
-		((int8_t *) &p1)[12] = psrc[1];
-		((int8_t *) &p2)[12] = (psrc + srcImageStrideInBytes)[0];
-		((int8_t *) &p3)[12] = (psrc + srcImageStrideInBytes)[1];
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 3) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 3);
+				p0[3] = psrc[0];
+				p1[3] = psrc[1];
+				p2[3] = (psrc + srcImageStrideInBytes)[0];
+				p3[3] = (psrc + srcImageStrideInBytes)[1];
 
 				p0_f = __builtin_msa_ffint_s_w(p0);
 				p1_f = __builtin_msa_ffint_s_w(p1);
@@ -1799,9 +1800,9 @@ int HafCpu_WarpAffine_U8_U8_Bilinear_Constant
 				unsigned char *psrc = pSrcImage + yint * srcImageStrideInBytes + xint;
 
 				p0 = (int) *(psrc);
-		p1 = (int) *(psrc + 1);
-		p2 = (int) *(psrc + srcImageStrideInBytes);
-		p3 = (int) *(psrc + srcImageStrideInBytes + 1);
+				p1 = (int) *(psrc + 1);
+				p2 = (int) *(psrc + srcImageStrideInBytes);
+				p3 = (int) *(psrc + srcImageStrideInBytes + 1);
 
 				p0_f = (float) p0;
 				p1_f = (float) p1;
@@ -2283,22 +2284,22 @@ int HafCpu_WarpPerspective_U8_U8_Nearest
 		x' = (ax+by+c)/(gx+hy+1)
 		y' = (dx+ey+f)/(gx+hy+1)
 	backward mapping:
-		x  = ((hf-e)x'+(b-hc)y'+(ec-bf))/(eg-dh)x'+(ah-bg)y'+(db-ae))
-		y  = ((d-fg)x'+(cg-a)y'+(af-dc))/(eg-dh)x'+(ah-bg)y'+(db-ae))
+		x = ((hf-e) x'+(b-hc) y '+(ec-bf))/(eg-dh) x'+(ah-bg) y'+(db-ae))
+		y = ((d-fg) x'+(cg-a) y'+(af-dc))/(eg-dh) x'+(ah-bg) y'+(db-ae))
 
 */
 int HafCpu_WarpPerspective_U8_U8_Nearest_Constant
 	(
-		vx_uint32		   dstWidth,
-		vx_uint32		   dstHeight,
-		vx_uint8		 * pDstImage,
-		vx_uint32		   dstImageStrideInBytes,
-		vx_uint32		   srcWidth,
-		vx_uint32		   srcHeight,
-		vx_uint8		 * pSrcImage,
-		vx_uint32		   srcImageStrideInBytes,
+		vx_uint32		dstWidth,
+		vx_uint32		dstHeight,
+		vx_uint8		* pDstImage,
+		vx_uint32		dstImageStrideInBytes,
+		vx_uint32		srcWidth,
+		vx_uint32		srcHeight,
+		vx_uint8		* pSrcImage,
+		vx_uint32		srcImageStrideInBytes,
 		ago_perspective_matrix_t * matrix,
-		vx_uint8		   border,
+		vx_uint8		border,
 		vx_uint8		* pLocalData
 	)
 {
