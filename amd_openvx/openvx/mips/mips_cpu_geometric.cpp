@@ -2257,6 +2257,466 @@ int HafCpu_WarpAffine_U8_U8_Nearest_Constant
 	return AGO_SUCCESS;
 }
 
+int HafCpu_WarpPerspective_U8_U8_Bilinear
+	(
+		vx_uint32		dstWidth,
+		vx_uint32		dstHeight,
+		vx_uint8		* pDstImage,
+		vx_uint32		dstImageStrideInBytes,
+		vx_uint32		srcWidth,
+		vx_uint32		srcHeight,
+		vx_uint8		* pSrcImage,
+		vx_uint32		srcImageStrideInBytes,
+		ago_perspective_matrix_t * matrix,
+		vx_uint8		* pLocalData
+	)
+{
+	return HafCpu_WarpPerspective_U8_U8_Bilinear_Constant(dstWidth, dstHeight, pDstImage, dstImageStrideInBytes, srcWidth,
+		srcHeight, pSrcImage, srcImageStrideInBytes, matrix, (unsigned char)0, pLocalData);
+}
+
+int HafCpu_WarpPerspective_U8_U8_Bilinear_Constant
+	(
+		vx_uint32		dstWidth,
+		vx_uint32		dstHeight,
+		vx_uint8		* pDstImage,
+		vx_uint32		dstImageStrideInBytes,
+		vx_uint32		srcWidth,
+		vx_uint32		srcHeight,
+		vx_uint8		* pSrcImage,
+		vx_uint32		srcImageStrideInBytes,
+		ago_perspective_matrix_t * matrix,
+		vx_uint8		border,
+		vx_uint8		* pLocalData
+	)
+{
+	// calculate inverse mapping coefficients for x and y
+	const float a = matrix->matrix[0][0];
+	const float d = matrix->matrix[0][1];
+	const float g = matrix->matrix[0][2];
+	const float b = matrix->matrix[1][0];
+	const float e = matrix->matrix[1][1];
+	const float h = matrix->matrix[1][2];
+	const float c = matrix->matrix[2][0];
+	const float f = matrix->matrix[2][1];
+	const float i = matrix->matrix[2][2];
+
+#if ENABLE_MSA
+	v4i32 xint, yint;
+	v4i32 xmask, ymask;
+	v4f32 xdest, ydest, zdest;
+	v4i32 zeromask = __builtin_msa_ldi_w(0);
+	v4i32 one = __builtin_msa_ldi_w(1);
+	v4f32 oneFloat = __builtin_msa_ffint_s_w(one);
+	v4i32 pborder = __builtin_msa_fill_w((int) border);
+	v4i32 srcbx = __builtin_msa_fill_w(srcWidth);
+	v4i32 srcby = __builtin_msa_fill_w(srcHeight);
+	v4i32 srcb = __builtin_msa_fill_w((int) ((srcHeight - 1) * srcImageStrideInBytes - 1));
+	v4i32 src_s = __builtin_msa_fill_w((int) srcImageStrideInBytes);
+	v4i32 srcbx1 = __builtin_msa_fill_w((int) (srcWidth - 1));
+	v4i32 srcby1 = __builtin_msa_fill_w((int) (srcHeight - 1));
+	v4i32 negone = __builtin_msa_fill_w((int) -1);
+#else
+	const int srcb = (srcHeight-1) * srcImageStrideInBytes - 1;
+#endif
+
+	unsigned int x;
+	float *A_x = (float *) pLocalData;
+	float *D_x = (float *) ALIGN16(A_x + dstWidth);
+	float *G_x = (float *) ALIGN16(D_x + dstWidth);
+
+	for (x = 0; x < dstWidth; x++)
+	{
+		A_x[x] = a * x;
+		D_x[x] = d * x;
+		// (eg - dh)
+		G_x[x] = g * x;
+	}
+
+	// can't assume if end points in the warped image is within boundary, all the warped image is within boundary
+	bool bBoder = 1;
+
+	unsigned int y = 0;
+	if (bBoder){
+	// do the plain vanilla version with floating point division in inner_loop
+		while (y < dstHeight)
+		{
+			float V1 = y * b + c;
+			float V2 = y * e + f;
+			float V3 = y * h + i;
+
+#if ENABLE_MSA
+			xdest = (v4f32) {V1, V1, V1, V1};
+			ydest = (v4f32) {V2, V2, V2, V2};
+			zdest = (v4f32) {V3, V3, V3, V3};
+
+			unsigned int *dst = (unsigned int *) pDstImage;
+#else // C
+			unsigned char *dst = (unsigned char *) pDstImage;
+#endif
+			x = 0;
+			while (x < dstWidth)
+			{
+#if ENABLE_MSA
+				unsigned char *psrc;
+				v4f32 xmap, ymap, zmap;
+				v4f32 xFraction, yFraction, one_minus_xFraction, one_minus_yFraction;
+				v4f32 p0_f, p1_f, p2_f, p3_f;
+				v4i32 p0, p1, p2, p3, xint, yint;
+				p0 = p1 = p2 = p3 = (v4i32) {0};
+				v16u8 mask, mask1;
+
+				xmap = (v4f32) __builtin_msa_ld_w((void *) &A_x[x], 0);
+				ymap = (v4f32) __builtin_msa_ld_w((void *) &D_x[x], 0);
+				zmap = (v4f32) __builtin_msa_ld_w((void *) &G_x[x], 0);
+
+				zmap = __builtin_msa_fadd_w(zmap, zdest);
+				xmap = __builtin_msa_fadd_w(xmap, xdest);
+				ymap = __builtin_msa_fadd_w(ymap, ydest);
+				zmap = __builtin_msa_fdiv_w(oneFloat, zmap);
+				xmap = __builtin_msa_fmul_w(xmap, zmap);
+				ymap = __builtin_msa_fmul_w(ymap, zmap);
+
+				xmask = __builtin_msa_fclt_w(xmap, (v4f32) zeromask);
+				ymask = __builtin_msa_fclt_w(ymap, (v4f32) zeromask);
+
+				// convert to integer with rounding towards zero
+				xint = __builtin_msa_ftrunc_s_w(xmap);
+				yint = __builtin_msa_ftrunc_s_w(ymap);
+
+				v4i32 temp1 = __builtin_msa_srli_w(xmask, 31);
+				xint = __builtin_msa_subv_w(xint, temp1);
+
+				temp1 = __builtin_msa_srli_w(ymask, 31);
+				ymask = __builtin_msa_subv_w(yint, temp1);
+
+				// mask for boundary checking
+				mask = (v16u8) __builtin_msa_clt_s_w(xint, srcbx);
+				mask = __builtin_msa_and_v((v16u8) __builtin_msa_cle_s_w(zeromask, xint), mask);
+				mask = __builtin_msa_and_v(mask, (v16u8) __builtin_msa_cle_s_w(yint, srcby));
+				mask = __builtin_msa_and_v((v16u8) __builtin_msa_cle_s_w(zeromask, yint), mask);
+
+				// xmap+1 < srcWidth;
+				mask1 = (v16u8) __builtin_msa_clt_s_w(xint, srcbx1);
+				mask1 = __builtin_msa_and_v((v16u8) __builtin_msa_cle_s_w(negone, xint), mask1);
+				mask1 = __builtin_msa_and_v(mask1, (v16u8) __builtin_msa_cle_s_w(yint, srcby1));
+				mask1 = __builtin_msa_and_v((v16u8) __builtin_msa_cle_s_w(negone, yint), mask1);
+
+				//xFraction = xmap-xint;
+				//yFraction = ymap-yint;
+				xFraction = __builtin_msa_ffint_s_w(xint);
+				yFraction = __builtin_msa_ffint_s_w(yint);
+				xFraction = __builtin_msa_fsub_w(xmap, xFraction);
+				yFraction = __builtin_msa_fsub_w(ymap, yFraction);
+
+				// clip for boundary
+				yint = __builtin_msa_mulv_w(yint, src_s);
+				yint = __builtin_msa_addv_w(yint, xint);
+				yint = __builtin_msa_min_s_w(yint, srcb);
+				yint = __builtin_msa_max_s_w(yint, zeromask);
+
+				//(1-xFraction)
+				//(1-yFraction)
+				one_minus_xFraction = __builtin_msa_fsub_w(oneFloat, xFraction);
+				one_minus_yFraction = __builtin_msa_fsub_w(oneFloat, yFraction);
+
+				// read pixels from src and re-arrange
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 0);
+				p0[0] = psrc[0];
+				p1[0] = psrc[1];
+				p2[0] = (psrc + srcImageStrideInBytes)[0];
+				p3[0] = (psrc + srcImageStrideInBytes)[1];
+
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 1);
+				p0[1] = psrc[0];
+				p1[1] = psrc[1];
+				p2[1] = (psrc + srcImageStrideInBytes)[0];
+				p3[1] = (psrc + srcImageStrideInBytes)[1];
+
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 2);
+				p0[2] = psrc[0];
+				p1[2] = psrc[1];
+				p2[2] = (psrc + srcImageStrideInBytes)[0];
+				p3[2] = (psrc + srcImageStrideInBytes)[1];
+
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 3);
+				p0[3] = psrc[0];
+				p1[3] = psrc[1];
+				p2[3] = (psrc + srcImageStrideInBytes)[0];
+				p3[3] = (psrc + srcImageStrideInBytes)[1];
+
+				// mask and combined result with border
+				p0 = (v4i32) __builtin_msa_bsel_v(mask, (v16u8) pborder, (v16u8) p0);
+				p2 = (v4i32) __builtin_msa_bsel_v(mask, (v16u8) pborder, (v16u8) p2);
+				p1 = (v4i32) __builtin_msa_bsel_v(mask1, (v16u8) pborder, (v16u8) p1);
+				p3 = (v4i32) __builtin_msa_bsel_v(mask1, (v16u8) pborder, (v16u8) p3);
+
+				p0_f = __builtin_msa_ffint_s_w(p0);
+				p1_f = __builtin_msa_ffint_s_w(p1);
+				p2_f = __builtin_msa_ffint_s_w(p2);
+				p3_f = __builtin_msa_ffint_s_w(p3);
+
+				p0_f = __builtin_msa_fmul_w(p0_f, one_minus_xFraction);
+				p0_f = __builtin_msa_fmul_w(p0_f, one_minus_yFraction);
+				p1_f = __builtin_msa_fmul_w(p1_f, xFraction);
+				p1_f = __builtin_msa_fmul_w(p1_f, one_minus_yFraction);
+				p2_f = __builtin_msa_fmul_w(p2_f, one_minus_xFraction);
+				p2_f = __builtin_msa_fmul_w(p2_f, yFraction);
+				p3_f = __builtin_msa_fmul_w(p3_f, xFraction);
+				p3_f = __builtin_msa_fmul_w(p3_f, yFraction);
+
+				p0_f = __builtin_msa_fadd_w(p0_f, p1_f);
+				p2_f = __builtin_msa_fadd_w(p2_f, p3_f);
+				p0_f = __builtin_msa_fadd_w(p0_f, p2_f);
+
+				p0 = __builtin_msa_ftrunc_s_w(p0_f);
+
+				// convert to unsigned char and write to dst
+				p0 = (v4i32) __builtin_msa_pckev_h((v8i16) zeromask, (v8i16) p0);
+				p0 = (v4i32) __builtin_msa_pckev_b((v16i8) zeromask, (v16i8) p0);
+
+				*dst++ = __builtin_msa_copy_u_w(p0, 0);
+
+				x += 4;
+#else // C
+				int xint, yint;
+				float xdest, ydest, zdest;
+				float xmap, ymap, zmap;
+				float xFraction, yFraction, one_minus_xFraction, one_minus_yFraction;
+				float p0_f, p1_f, p2_f, p3_f;
+				unsigned int p0, p1, p2, p3;
+
+				zmap = 1.0f / (G_x[x] + V3);
+				xmap = (A_x[x] + V1) * zmap;
+				ymap = (D_x[x] + V2) * zmap;
+
+				unsigned int xmask = (xmap < 0) ? 1 : 0;
+				unsigned int ymask = (ymap < 0) ? 1 : 0;
+
+				xint = (int) xmap - xmask;
+				yint = (int) ymap - ymask;
+
+				int mask = (xint >= 0 ? 1 : 0) & (xint < (srcWidth) ? 1 : 0) &
+				(yint >= 0 ? 1 : 0) & (yint < (srcHeight) ? 1 : 0);
+				int mask1 = (xint >= -1 ? 1 : 0) & (xint < (srcWidth - 1) ? 1 : 0) &
+				(yint >= -1 ? 1 : 0) & (yint < (srcHeight - 1) ? 1 : 0);
+
+				xFraction = xmap - (float) xint;
+				yFraction = ymap - (float) yint;
+
+				one_minus_xFraction = 1.0f - xFraction;
+				one_minus_yFraction = 1.0f - yFraction;
+
+				yint = yint * srcImageStrideInBytes + xint;
+				yint = (yint < srcb) ? yint : srcb;
+				yint = (yint > 0) ? yint : 0;
+
+				unsigned char *psrc = pSrcImage + yint;
+
+				p0 = (unsigned int) *(psrc);
+				p1 = (unsigned int) *(psrc + 1);
+				p2 = (unsigned int) *(psrc + srcImageStrideInBytes);
+				p3 = (unsigned int) *(psrc + srcImageStrideInBytes + 1);
+
+				if(!mask){
+					p0 = border;
+					p2 = border;
+				}
+
+				if(!mask1){
+					p1 = border;
+					p3 = border;
+				}
+
+				p0_f = (float) p0;
+				p1_f = (float) p1;
+				p2_f = (float) p2;
+				p3_f = (float) p3;
+
+				p0_f *= one_minus_xFraction * one_minus_yFraction;
+				p1_f *= xFraction * one_minus_yFraction;
+				p2_f *= one_minus_xFraction * yFraction;
+				p3_f *= xFraction * yFraction;
+
+				p0_f += p1_f;
+				p0_f += p2_f;
+				p0_f += p3_f;
+				p0 = (int) p0_f;
+
+				unsigned char *pok = (unsigned char *) &p0;
+				*dst++ = pok[0];
+
+				x++;
+#endif
+			}
+			y++;
+			pDstImage += dstImageStrideInBytes;
+		}
+	}
+	else
+	{
+	// do the plain vanilla version with floating point division in inner_loop
+		while (y < dstHeight)
+		{
+			const float V1 = y * b + c;
+			const float V2 = y * e + f;
+			const float V3 = y * h + i;
+#if ENABLE_MSA
+			xdest = (v4f32) {V1, V1, V1, V1};
+			ydest = (v4f32) {V2, V2, V2, V2};
+			zdest = (v4f32) {V3, V3, V3, V3};
+
+			unsigned int *dst = (unsigned int *) pDstImage;
+#else // C
+			unsigned char *dst = (unsigned char *) pDstImage;
+#endif
+			x = 0;
+			while (x < dstWidth)
+			{
+#if ENABLE_MSA
+				unsigned char *psrc;
+				v4f32 xmap, ymap, zmap;
+				v4f32 xFraction, yFraction, one_minus_xFraction, one_minus_yFraction;
+				v4f32 p0_f, p1_f, p2_f, p3_f;
+				v4i32 p0, p1, p2, p3, xint, yint;
+				p0 = p1 = p2 = p3 = (v4i32) {0};
+
+				xmap = (v4f32) __builtin_msa_ld_w((void *) &A_x[x], 0);
+				ymap = (v4f32) __builtin_msa_ld_w((void *) &D_x[x], 0);
+				zmap = (v4f32) __builtin_msa_ld_w((void *) &G_x[x], 0);
+
+				zmap = __builtin_msa_fadd_w(zmap, zdest);
+				xmap = __builtin_msa_fadd_w(xmap, xdest);
+				ymap = __builtin_msa_fadd_w(ymap, ydest);
+
+				zmap = __builtin_msa_fdiv_w(oneFloat, zmap);
+				xmap = __builtin_msa_fmul_w(xmap, zmap);
+				ymap = __builtin_msa_fmul_w(ymap, zmap);
+
+				// convert to integer with rounding towards zero
+				xint = __builtin_msa_ftrunc_s_w(xmap);
+				yint = __builtin_msa_ftrunc_s_w(ymap);
+
+				//xFraction = xmap-xint;
+				//yFraction = ymap-yint;
+				xFraction = __builtin_msa_ffint_s_w(xint);
+				xFraction = __builtin_msa_fsub_w(xmap, xFraction);
+
+				yFraction = __builtin_msa_ffint_s_w(yint);
+				yFraction = __builtin_msa_fsub_w(ymap, yFraction);
+
+				//(1-xFraction)
+				//(1-yFraction)
+				one_minus_xFraction = __builtin_msa_fsub_w(oneFloat, xFraction);
+				one_minus_yFraction = __builtin_msa_fsub_w(oneFloat, yFraction);
+
+				yint = __builtin_msa_min_s_w(yint, srcb);
+				yint = __builtin_msa_max_s_w(yint, zeromask);
+
+				// read pixels from src and re-arrange
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 0) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 0);
+				p0[0] = psrc[0];
+				p1[0] = psrc[1];
+				p2[0] = (psrc + srcImageStrideInBytes)[0];
+				p3[0] = (psrc + srcImageStrideInBytes)[1];
+
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 1) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 1);
+				p0[1] = psrc[0];
+				p1[1] = psrc[1];
+				p2[1] = (psrc + srcImageStrideInBytes)[0];
+				p3[1] = (psrc + srcImageStrideInBytes)[1];
+
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 2) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 2);
+				p0[2] = psrc[0];
+				p1[2] = psrc[1];
+				p2[2] = (psrc + srcImageStrideInBytes)[0];
+				p3[2] = (psrc + srcImageStrideInBytes)[1];
+
+				psrc = pSrcImage + __builtin_msa_copy_s_w(yint, 3) * srcImageStrideInBytes + __builtin_msa_copy_s_w(xint, 3);
+				p0[3] = psrc[0];
+				p1[3] = psrc[1];
+				p2[3] = (psrc + srcImageStrideInBytes)[0];
+				p3[3] = (psrc + srcImageStrideInBytes)[1];
+
+				p0_f = __builtin_msa_ffint_s_w(p0);
+				p1_f = __builtin_msa_ffint_s_w(p1);
+				p2_f = __builtin_msa_ffint_s_w(p2);
+				p3_f = __builtin_msa_ffint_s_w(p3);
+
+				p0_f = __builtin_msa_fmul_w(p0_f, one_minus_xFraction);
+				p0_f = __builtin_msa_fmul_w(p0_f, one_minus_yFraction);
+				p1_f = __builtin_msa_fmul_w(p1_f, xFraction);
+				p1_f = __builtin_msa_fmul_w(p1_f, one_minus_yFraction);
+				p2_f = __builtin_msa_fmul_w(p2_f, one_minus_xFraction);
+				p2_f = __builtin_msa_fmul_w(p2_f, yFraction);
+				p3_f = __builtin_msa_fmul_w(p3_f, xFraction);
+				p3_f = __builtin_msa_fmul_w(p3_f, yFraction);
+
+				p0_f = __builtin_msa_fadd_w(p0_f, p1_f);
+				p2_f = __builtin_msa_fadd_w(p2_f, p3_f);
+				p0_f = __builtin_msa_fadd_w(p0_f, p2_f);
+
+				p0 = __builtin_msa_ftrunc_s_w(p0_f);
+
+				// convert to unsigned char and write to dst
+				p0 = (v4i32) __builtin_msa_pckev_h((v8i16) zeromask, (v8i16) p0);
+				p0 = (v4i32) __builtin_msa_pckev_b((v16i8) zeromask, (v16i8) p0);
+
+				*dst++ = __builtin_msa_copy_u_w(p0, 0);
+
+				x += 4;
+#else // C
+
+				int xint, yint;
+				float xdest, ydest, zdest;
+				float xmap, ymap, zmap;
+				float xFraction, yFraction, one_minus_xFraction, one_minus_yFraction;
+				float p0_f, p1_f, p2_f, p3_f;
+				int p0, p1, p2, p3;
+
+				zmap = 1.0f / (G_x[x] + V3);
+				xmap = (A_x[x] + V1) * zmap;
+				ymap = (D_x[x] + V2) * zmap;
+
+				xint = (int) xmap;
+				yint = (int) ymap;
+
+				xFraction = xmap - xint;
+				yFraction = ymap - yint;
+
+				one_minus_xFraction = 1.0f - xFraction;
+				one_minus_yFraction = 1.0f - yFraction;
+
+				unsigned char *psrc = pSrcImage + yint * srcImageStrideInBytes + xint;
+
+				p0 = (int) *(psrc);
+				p1 = (int) *(psrc + 1);
+				p2 = (int) *(psrc + srcImageStrideInBytes);
+				p3 = (int) *(psrc + srcImageStrideInBytes + 1);
+
+				p0_f = p0 * one_minus_xFraction * one_minus_yFraction;
+				p1_f = p1 * xFraction * one_minus_yFraction;
+				p2_f = p2 * one_minus_xFraction * yFraction;
+				p3_f = p3 * xFraction * yFraction;
+
+				p0_f += p1_f;
+				p2_f += p3_f;
+				p0_f += p2_f;
+
+				p0 = (int) p0_f;
+
+				*dst++ = *((unsigned char *) &p0);
+
+				x++;
+#endif
+			}
+			y++;
+			pDstImage += dstImageStrideInBytes;
+		}
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_WarpPerspective_U8_U8_Nearest
 	(
 		vx_uint32			dstWidth,
