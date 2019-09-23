@@ -2083,32 +2083,6 @@ int HafCpu_IntegralImage_U32_U8
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_Histogram_DATA_U8
-	(
-		vx_uint32     dstHist[],
-		vx_uint32     srcWidth,
-		vx_uint32     srcHeight,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
-int HafCpu_HistogramFixedBins_DATA_U8
-	(
-		vx_uint32     dstHist[],
-		vx_uint32     distBinCount,
-		vx_uint32     distOffset,
-		vx_uint32     distRange,
-		vx_uint32     distWindow,
-		vx_uint32     srcWidth,
-		vx_uint32     srcHeight,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_MeanStdDev_DATA_U8
 	(
 		vx_float32  * pSum,

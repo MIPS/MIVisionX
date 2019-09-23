@@ -60,6 +60,7 @@ if (BUILD_MIPS OR C_IMPL)
 		mips/mips_cpu_filter.cpp
 		mips/mips_cpu_geometric.cpp
 		mips/mips_cpu_fast_corners.cpp
+		mips/mips_cpu_histogram.cpp
 	)
 else (BUILD_MIPS OR C_IMPL)
 	list(APPEND SOURCES

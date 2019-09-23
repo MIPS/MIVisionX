@@ -421,7 +421,7 @@ int HafCpu_FastAtan2_Canny
 {
 	unsigned int ret;
 	vx_uint16 ax, ay;
-	ax = abs(Gx), ay = abs(Gy);   // todo:: check if math.h function is faster
+	ax = abs(Gx), ay = abs(Gy); // todo:: check if math.h function is faster
 	float d1 = (float) ax * 0.4142135623730950488016887242097f;
 	float d2 = (float) ax * 2.4142135623730950488016887242097f;
 	ret = (Gx * Gy) < 0 ? 3 : 1;
@@ -430,6 +430,87 @@ int HafCpu_FastAtan2_Canny
 	if (ay >= d2)
 		ret = 2;
 	return ret;
+}
+
+#define NUM_BINS 256
+int HafCpu_Histogram_DATA_U8
+	(
+		vx_uint32     dstHist[],
+		vx_uint32     srcWidth,
+		vx_uint32     srcHeight,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+#if ENABLE_MSA
+	unsigned int *pdst = dstHist;
+	memset(pdst, 0x0, NUM_BINS * sizeof(unsigned int));
+	for (unsigned int y = 0; y < srcHeight; y++)
+	{
+		unsigned int * src = (unsigned int *) (pSrcImage + y * srcImageStrideInBytes);
+		unsigned int * srclast = src + (srcWidth >> 2);
+		while (src < srclast)
+		{
+			v16u8 pixels = (v16u8) __builtin_msa_ld_b((void *) src, 0);
+
+			pdst[pixels[0]]++;
+			pdst[pixels[1]]++;
+			pdst[pixels[2]]++;
+			pdst[pixels[3]]++;
+			pdst[pixels[4]]++;
+			pdst[pixels[5]]++;
+			pdst[pixels[6]]++;
+			pdst[pixels[7]]++;
+			pdst[pixels[8]]++;
+			pdst[pixels[9]]++;
+			pdst[pixels[10]]++;
+			pdst[pixels[11]]++;
+			pdst[pixels[12]]++;
+			pdst[pixels[13]]++;
+			pdst[pixels[14]]++;
+			pdst[pixels[15]]++;
+
+			src += 4;
+		}
+	}
+#else	// C
+	unsigned int *pdst = dstHist;
+	memset(pdst, 0x0, NUM_BINS * sizeof(unsigned int));
+	for (unsigned int y = 0; y < srcHeight; y++)
+	{
+		unsigned int * src = (unsigned int *) (pSrcImage + y * srcImageStrideInBytes);
+		unsigned int * srclast = src + (srcWidth >> 2);
+		while (src < srclast)
+		{
+			// do for 16 pixels..
+			unsigned int pixel4;
+			pixel4 = *src++;
+			pdst[(pixel4 & 0xFF)]++;
+			pdst[(pixel4 >> 8) & 0xFF]++;
+			pdst[(pixel4 >> 16) & 0xFF]++;
+			pdst[(pixel4 >> 24) & 0xFF]++;
+
+			pixel4 = *src++;
+			pdst[(pixel4 & 0xFF)]++;
+			pdst[(pixel4 >> 8) & 0xFF]++;
+			pdst[(pixel4 >> 16) & 0xFF]++;
+			pdst[(pixel4 >> 24) & 0xFF]++;
+
+			pixel4 = *src++;
+			pdst[(pixel4 & 0xFF)]++;
+			pdst[(pixel4 >> 8) & 0xFF]++;
+			pdst[(pixel4 >> 16) & 0xFF]++;
+			pdst[(pixel4 >> 24) & 0xFF]++;
+
+			pixel4 = *src++;
+			pdst[(pixel4 & 0xFF)]++;
+			pdst[(pixel4 >> 8) & 0xFF]++;
+			pdst[(pixel4 >> 16) & 0xFF]++;
+			pdst[(pixel4 >> 24) & 0xFF]++;
+		}
+	}
+#endif
+	return AGO_SUCCESS;
 }
 
 int HafCpu_Sub_U8_U8U8_Wrap
@@ -592,7 +673,7 @@ int HafCpu_Threshold_U1_U8_Binary
 	v16u8 thresh = (v16u8) __builtin_msa_fill_b((int) threshold);
 	// mask for 2 x 8-bit U8 to U1 conversion
 	unsigned char mask[16] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80};
-	v16u8 vmask =  (v16u8) __builtin_msa_ld_w(&mask, 0);
+	v16u8 vmask = (v16u8) __builtin_msa_ld_w(&mask, 0);
 
 	int alignedWidth = dstWidth & ~15;
 	int postfixWidth = dstWidth - alignedWidth;
@@ -639,8 +720,8 @@ int HafCpu_Threshold_U1_U8_Binary
 			*pLocalDst++ = (vx_uint8) (pixelmask & 0xFF);
 		}
 #else
-	    pLocalDst = (vx_uint8 *) pDstImage;
-	    pLocalSrc = (vx_uint8 *) pSrcImage;
+		pLocalDst = (vx_uint8 *) pDstImage;
+		pLocalSrc = (vx_uint8 *) pSrcImage;
 		int width = 0;
 		while (width < dstWidth)
 		{
