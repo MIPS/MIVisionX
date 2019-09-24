@@ -1036,20 +1036,6 @@ int HafCpu_Mul_S16_S16S16_Sat_Round
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_Magnitude_S16_S16S16
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_int16    * pMagImage,
-		vx_uint32     magImageStrideInBytes,
-		vx_int16    * pGxImage,
-		vx_uint32     gxImageStrideInBytes,
-		vx_int16    * pGyImage,
-		vx_uint32     gyImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_MemSet_U24
 	(
 		vx_size       count,
@@ -2437,14 +2423,6 @@ int HafCpu_MinMaxLocMerge_DATA_DATA
 
 
 // helper functions for phase
-float HafCpu_FastAtan2_deg
-(
-	vx_int16	  Gx,
-	vx_int16      Gy
-){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 
 float HafCpu_FastAtan2_rad
 (

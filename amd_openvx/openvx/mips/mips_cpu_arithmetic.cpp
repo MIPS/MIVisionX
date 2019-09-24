@@ -432,6 +432,34 @@ int HafCpu_FastAtan2_Canny
 	return ret;
 }
 
+float HafCpu_FastAtan2_deg
+	(
+		vx_int16      Gx,
+		vx_int16      Gy
+	)
+{
+	vx_uint16 ax, ay;
+	ax = std::abs(Gx), ay = std::abs(Gy);
+	float a, c, c2;
+	if (ax >= ay)
+	{
+		c = (float) ay / ((float) ax + (float) DBL_EPSILON);
+		c2 = c*c;
+		a = (((atan2_p7 * c2 + atan2_p5) * c2 + atan2_p3) * c2 + atan2_p1) * c;
+	}
+	else
+	{
+		c = (float) ax / ((float) ay + (float) DBL_EPSILON);
+		c2 = c*c;
+		a = 90.f - (((atan2_p7 * c2 + atan2_p5) * c2 + atan2_p3) * c2 + atan2_p1) * c;
+	}
+	if (Gx < 0)
+		a = 180.f - a;
+	if (Gy < 0)
+		a = 360.f - a;
+	return a;
+}
+
 #define NUM_BINS 256
 int HafCpu_Histogram_DATA_U8
 	(
@@ -510,6 +538,40 @@ int HafCpu_Histogram_DATA_U8
 		}
 	}
 #endif
+	return AGO_SUCCESS;
+}
+
+int HafCpu_Magnitude_S16_S16S16
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pMagImage,
+		vx_uint32     magImageStrideInBytes,
+		vx_int16    * pGxImage,
+		vx_uint32     gxImageStrideInBytes,
+		vx_int16    * pGyImage,
+		vx_uint32     gyImageStrideInBytes
+	)
+{
+	short *pLocalGx, *pLocalGy, *pLocalDst;
+
+	for (unsigned int height = 0; height < dstHeight; height++)
+	{
+		pLocalGx = (short *) pGxImage;
+		pLocalGy = (short *) pGyImage;
+		pLocalDst = (short *) pMagImage;
+
+		for (int x = 0; x < dstWidth; x++, pLocalGx++, pLocalGy++)
+		{
+			float temp = (float) (*pLocalGx * *pLocalGx) + (float) (*pLocalGy * *pLocalGy);
+			temp = sqrtf(temp);
+			*pLocalDst++ = max(min((vx_int32) temp, INT16_MAX), INT16_MIN);
+		}
+		pGxImage += (gxImageStrideInBytes >> 1);
+		pGyImage += (gyImageStrideInBytes >> 1);
+		pMagImage += (magImageStrideInBytes >> 1);
+	}
+
 	return AGO_SUCCESS;
 }
 
