@@ -1050,20 +1050,6 @@ int HafCpu_Magnitude_S16_S16S16
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_Phase_U8_S16S16
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pPhaseImage,
-		vx_uint32     phaseImageStrideInBytes,
-		vx_int16    * pGxImage,
-		vx_uint32     gxImageStrideInBytes,
-		vx_int16    * pGyImage,
-		vx_uint32     gyImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_MemSet_U24
 	(
 		vx_size       count,

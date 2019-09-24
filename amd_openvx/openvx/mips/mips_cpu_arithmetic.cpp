@@ -539,6 +539,41 @@ int HafCpu_MinMaxMerge_DATA_DATA
 	return AGO_SUCCESS;
 }
 
+int HafCpu_Phase_U8_S16S16
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pPhaseImage,
+		vx_uint32     phaseImageStrideInBytes,
+		vx_int16    * pGxImage,
+		vx_uint32     gxImageStrideInBytes,
+		vx_int16    * pGyImage,
+		vx_uint32     gyImageStrideInBytes
+	)
+{
+	unsigned int y = 0;
+	// do the plain vanilla version with atan2
+	while (y < dstHeight)
+	{
+		vx_uint8 *pdst = pPhaseImage;
+		vx_int16 *pGx = pGxImage;
+		vx_int16 *pGy = pGyImage;
+
+		for (unsigned int x = 0; x < dstWidth; x++)
+		{
+			float scale = (float)128 / 180.f;
+			float arct = HafCpu_FastAtan2_deg(pGx[x], pGy[x]);
+			// normalize and copy to dst
+			*pdst++ = (vx_uint8) ((vx_uint32) (arct*scale + 0.5) & 0xFF);
+
+		}
+		pPhaseImage += phaseImageStrideInBytes;
+		pGxImage += (gxImageStrideInBytes>>1);
+		pGyImage += (gyImageStrideInBytes>>1);
+		y++;
+	}
+	return AGO_SUCCESS;
+}
 int HafCpu_Sub_U8_U8U8_Wrap
 	(
 		vx_uint32     dstWidth,
