@@ -2149,17 +2149,6 @@ int HafCpu_MinMax_DATA_S16
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_MinMaxMerge_DATA_DATA
-	(
-		vx_int32    * pDstMinValue,
-		vx_int32    * pDstMaxValue,
-		vx_uint32     numDataPartitions,
-		vx_int32      srcMinValue[],
-		vx_int32      srcMaxValue[]
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_MinMaxLoc_DATA_U8DATA_Loc_None_Count_Min
 	(
 		vx_uint32          * pMinLocCount,

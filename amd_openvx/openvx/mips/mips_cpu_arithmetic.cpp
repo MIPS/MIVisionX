@@ -513,6 +513,32 @@ int HafCpu_Histogram_DATA_U8
 	return AGO_SUCCESS;
 }
 
+int HafCpu_MinMaxMerge_DATA_DATA
+	(
+		vx_int32    * pDstMinValue,
+		vx_int32    * pDstMaxValue,
+		vx_uint32     numDataPartitions,
+		vx_int32      srcMinValue[],
+		vx_int32      srcMaxValue[]
+	)
+{
+	vx_int32 minVal, maxVal;
+
+	minVal = srcMinValue[0];
+	maxVal = srcMaxValue[0];
+
+	for (int i = 1; i < (int) numDataPartitions; i++)
+	{
+		minVal = min(minVal, srcMinValue[i]);
+		maxVal = min(minVal, srcMaxValue[i]);
+	}
+
+	*pDstMinValue = minVal;
+	*pDstMaxValue = maxVal;
+
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Sub_U8_U8U8_Wrap
 	(
 		vx_uint32     dstWidth,
