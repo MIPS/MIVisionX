@@ -317,21 +317,107 @@ int HafCpu_Add_U8_U8U8_Sat
 	)
 {
 	vx_uint8 *pLocalSrc1, *pLocalSrc2, *pLocalDst;
-
-	for (int height = 0; height < (int) dstHeight; height++)
+#if ENABLE_MSA
+	v16i8 *pLocalSrc1_msa, *pLocalSrc2_msa, *pLocalDst_msa;
+	v16i8 pixels1, pixels2, pixels3, pixels4;
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+	for (int height = 0; height < dstHeight; height++)
 	{
-#if 0 //ENABLE_MSA
-#else
+#if ENABLE_MSA
+		pLocalSrc1_msa = (v16i8 *) pSrcImage1;
+		pLocalSrc2_msa = (v16i8 *) pSrcImage2;
+		pLocalDst_msa = (v16i8 *) pDstImage;
+		for (int width = 0; width < alignedWidth; width += 32)
+		{
+			pixels1 = __builtin_msa_ld_b((void *) pLocalSrc1_msa++, 0);
+			pixels2 = __builtin_msa_ld_b((void *) pLocalSrc1_msa++, 0);
+			pixels3 = __builtin_msa_ld_b((void *) pLocalSrc2_msa++, 0);
+			pixels4 = __builtin_msa_ld_b((void *) pLocalSrc2_msa++, 0);
+			pixels1 = (v16i8) __builtin_msa_adds_u_b((v16u8) pixels1, (v16u8) pixels3);
+			pixels2 = (v16i8) __builtin_msa_adds_u_b((v16u8) pixels2, (v16u8) pixels4);
+			__builtin_msa_st_b(pixels1, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_b(pixels2, (void *) pLocalDst_msa++, 0);
+		}
+		pLocalSrc1 = (vx_uint8 *) pLocalSrc1_msa;
+		pLocalSrc2 = (vx_uint8 *) pLocalSrc2_msa;
+		pLocalDst = (vx_uint8 *) pLocalDst_msa;
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			int temp = (int) (*pLocalSrc1++) + (int) (*pLocalSrc2++);
+			*pLocalDst++ = (vx_uint8) min(temp, UINT8_MAX);
+		}
+#else	// C
 		pLocalSrc1 = (vx_uint8 *) pSrcImage1;
 		pLocalSrc2 = (vx_uint8 *) pSrcImage2;
 		pLocalDst = (vx_uint8 *) pDstImage;
-
 		for (int width = 0; width < dstWidth; width++)
 		{
-			int temp = (int) (*pLocalSrc1++) + (int) (*pLocalSrc2++);
-			*pLocalDst++ = (vx_uint8) max(min((int) temp, UINT8_MAX), 0);
+			int temp = *pLocalSrc1++ + *pLocalSrc2++;
+			*pLocalDst++ = (vx_uint8) min(temp, UINT8_MAX);
 		}
+#endif
+		pSrcImage1 += srcImage1StrideInBytes;
+		pSrcImage2 += srcImage2StrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
 
+int HafCpu_Add_U8_U8U8_Wrap
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_uint8    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes
+	)
+{
+	vx_uint8 *pLocalSrc1, *pLocalSrc2, *pLocalDst;
+#if ENABLE_MSA
+	v16i8 *pLocalSrc1_msa, *pLocalSrc2_msa, *pLocalDst_msa;
+	v16i8 pixels1, pixels2, pixels3, pixels4;
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		pLocalSrc1_msa = (v16i8 *) pSrcImage1;
+		pLocalSrc2_msa = (v16i8 *) pSrcImage2;
+		pLocalDst_msa = (v16i8 *) pDstImage;
+		for (int width = 0; width < alignedWidth; width += 32)
+		{
+			pixels1 = __builtin_msa_ld_b((void *) pLocalSrc1_msa++, 0);
+			pixels2 = __builtin_msa_ld_b((void *) pLocalSrc1_msa++, 0);
+			pixels3 = __builtin_msa_ld_b((void *) pLocalSrc2_msa++, 0);
+			pixels4 = __builtin_msa_ld_b((void *) pLocalSrc2_msa++, 0);
+			pixels1 = __builtin_msa_addv_b(pixels1, pixels3);
+			pixels2 = __builtin_msa_addv_b(pixels2, pixels4);
+			__builtin_msa_st_b(pixels1, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_b(pixels2, (void *) pLocalDst_msa++, 0);
+		}
+		pLocalSrc1 = (vx_uint8 *) pLocalSrc1_msa;
+		pLocalSrc2 = (vx_uint8 *) pLocalSrc2_msa;
+		pLocalDst = (vx_uint8 *) pLocalDst_msa;
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			vx_int16 temp = (vx_int16) (*pLocalSrc1++) + (vx_int16) (*pLocalSrc2++);
+			*pLocalDst++ = (vx_uint8) temp;
+		}
+#else	// C
+		pLocalSrc1 = (vx_uint8 *) pSrcImage1;
+		pLocalSrc2 = (vx_uint8 *) pSrcImage2;
+		pLocalDst = (vx_uint8 *) pDstImage;
+		for (int width = 0; width < dstWidth; width++)
+		{
+			vx_int16 temp = (vx_int16) (*pLocalSrc1++) + (vx_int16) (*pLocalSrc2++);
+			*pLocalDst++ = (vx_uint8) temp;
+		}
 #endif
 		pSrcImage1 += srcImage1StrideInBytes;
 		pSrcImage2 += srcImage2StrideInBytes;
