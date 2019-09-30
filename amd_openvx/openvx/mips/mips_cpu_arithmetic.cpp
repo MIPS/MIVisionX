@@ -162,6 +162,72 @@ int HafCpu_AbsDiff_S16_S16S16_Sat
 	return AGO_SUCCESS;
 }
 
+int HafCpu_Add_S16_S16S16_Sat
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_int16    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_int16    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes
+	)
+{
+	vx_int16 *pLocalSrc1, *pLocalSrc2, *pLocalDst;
+#if ENABLE_MSA
+	v8i16 *pLocalSrc1_msa, *pLocalSrc2_msa, *pLocalDst_msa;
+	v8i16 pixels1, pixels2, pixels3, pixels4;
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		pLocalSrc1_msa = (v8i16 *) pSrcImage1;
+		pLocalSrc2_msa = (v8i16 *) pSrcImage2;
+		pLocalDst_msa = (v8i16 *) pDstImage;
+
+		for (int width = 0; width < alignedWidth; width += 16)
+		{
+			pixels1 = __builtin_msa_ld_h((void *) pLocalSrc1_msa++, 0);
+			pixels2 = __builtin_msa_ld_h((void *) pLocalSrc1_msa++, 0);
+			pixels3 = __builtin_msa_ld_h((void *) pLocalSrc2_msa++, 0);
+			pixels4 = __builtin_msa_ld_h((void *) pLocalSrc2_msa++, 0);
+			pixels1 = __builtin_msa_adds_s_h(pixels1, pixels3);
+			pixels2 = __builtin_msa_adds_s_h(pixels2, pixels4);
+			__builtin_msa_st_h(pixels1, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_h(pixels2, (void *) pLocalDst_msa++, 0);
+		}
+
+		pLocalSrc1 = (vx_int16 *) pLocalSrc1_msa;
+		pLocalSrc2 = (vx_int16 *) pLocalSrc2_msa;
+		pLocalDst = (vx_int16 *) pLocalDst_msa;
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			vx_int32 temp = (vx_int32) (*pLocalSrc1++) + (vx_int32) (*pLocalSrc2++);
+			*pLocalDst++ = (vx_int16) max(min(temp, INT16_MAX), INT16_MIN);
+		}
+
+#else	// C
+		pLocalSrc1 = (vx_int16 *) pSrcImage1;
+		pLocalSrc2 = (vx_int16 *) pSrcImage2;
+		pLocalDst = (vx_int16 *) pDstImage;
+
+		for (int width = 0; width < dstWidth; width++)
+		{
+			vx_int32 temp = (vx_int32) (*pLocalSrc1++) + (vx_int32) (*pLocalSrc2++);
+			*pLocalDst++ = (vx_int16) max(min(temp, INT16_MAX), INT16_MIN);
+		}
+#endif
+		pSrcImage1 += (srcImage1StrideInBytes >> 1);
+		pSrcImage2 += (srcImage2StrideInBytes >> 1);
+		pDstImage += (dstImageStrideInBytes >> 1);
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Add_S16_S16S16_Wrap
 	(
 		vx_uint32     dstWidth,
@@ -226,6 +292,75 @@ int HafCpu_Add_S16_S16S16_Wrap
 #endif
 		pSrcImage1 += (srcImage1StrideInBytes >> 1);
 		pSrcImage2 += (srcImage2StrideInBytes >> 1);
+		pDstImage += (dstImageStrideInBytes >> 1);
+	}
+	return AGO_SUCCESS;
+}
+
+int HafCpu_Add_S16_S16U8_Sat
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_int16    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_uint8    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes
+	)
+{
+	vx_uint8 *pLocalSrc8;
+	vx_int16 *pLocalSrc16, *pLocalDst;
+#if ENABLE_MSA
+	v8i16 *pLocalSrc16_msa, *pLocalSrc8_msa, *pLocalDst_msa;
+	v8i16 pixels1H, pixels1L, pixels2H, pixels2L;
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		pLocalSrc16_msa = (v8i16 *) pSrcImage1;
+		pLocalSrc8_msa = (v8i16 *) pSrcImage2;
+		pLocalDst_msa = (v8i16 *) pDstImage;
+
+		for (int width = 0; width < alignedWidth; width += 16)
+		{
+			pixels1L = __builtin_msa_ld_h((void *) pLocalSrc16_msa++, 0);
+			pixels1H = __builtin_msa_ld_h((void *) pLocalSrc16_msa++, 0);
+			pixels2L = __builtin_msa_ld_h((void *) pLocalSrc8_msa++, 0);
+			pixels2H = (v8i16) __builtin_msa_ilvl_b(zeromask, (v16i8) pixels2L);
+			pixels2L = (v8i16) __builtin_msa_ilvr_b(zeromask, (v16i8) pixels2L);
+
+			pixels1L = __builtin_msa_adds_s_h( pixels1L, pixels2L);
+			pixels1H = __builtin_msa_adds_s_h( pixels1H, pixels2H);
+			__builtin_msa_st_h(pixels1L, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_h(pixels1H, (void *) pLocalDst_msa++, 0);
+		}
+
+		pLocalSrc16 = (vx_int16 *) pLocalSrc16_msa;
+		pLocalSrc8 = (vx_uint8 *) pLocalSrc8_msa;
+		pLocalDst = (vx_int16 *) pLocalDst_msa;
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			vx_int32 temp = (vx_int32) (*pLocalSrc16++) + (vx_int32) (*pLocalSrc8++);
+			*pLocalDst++ = (vx_int16) max(min(temp, INT16_MAX), INT16_MIN);
+		}
+#else	// C
+		pLocalSrc16 = (vx_int16 *) pSrcImage1;
+		pLocalSrc8 = (vx_uint8 *) pSrcImage2;
+		pLocalDst = (vx_int16 *) pDstImage;
+
+		for (int width = 0; width < dstWidth; width++)
+		{
+			vx_int32 temp = (vx_int32) (*pLocalSrc16++) + (vx_int32) (*pLocalSrc8++);
+			*pLocalDst++ = (vx_int16) max(min(temp, INT16_MAX), INT16_MIN);
+		}
+#endif
+		pSrcImage1 += (srcImage1StrideInBytes >> 1);
+		pSrcImage2 += srcImage2StrideInBytes;
 		pDstImage += (dstImageStrideInBytes >> 1);
 	}
 	return AGO_SUCCESS;
