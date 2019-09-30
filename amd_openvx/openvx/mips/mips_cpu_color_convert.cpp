@@ -244,3 +244,73 @@ int HafCpu_ColorConvert_Y_RGB
 	}
 	return AGO_SUCCESS;
 }
+
+int HafCpu_ColorConvert_RGB_IYUV
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcYImage,
+		vx_uint32     srcYImageStrideInBytes,
+		vx_uint8    * pSrcUImage,
+		vx_uint32     srcUImageStrideInBytes,
+		vx_uint8    * pSrcVImage,
+		vx_uint32     srcVImageStrideInBytes
+	)
+{
+	int alignedWidth = dstWidth & ~15;
+	alignedWidth -= 16;
+	int postfixWidth = (int) dstWidth - alignedWidth;
+	vx_uint8 Upixels[8], Vpixels[8];
+
+	for (int height = 0; height < (int) dstHeight; height += 2)
+	{
+		vx_uint8 * pLocalSrcY = pSrcYImage;
+		vx_uint8 * pLocalSrcU = pSrcUImage;
+		vx_uint8 * pLocalSrcV = pSrcVImage;
+		vx_uint8 * pLocalDst = pDstImage;
+
+		// Processing two pixels at a time in a row
+		for (int width = 0; width < (int) dstWidth; width += 2)
+		{
+			float Ypix, Rpix, Gpix, Bpix;
+
+			Ypix = (float) (*pLocalSrcY);
+			Rpix = (float) (*pLocalSrcV++) - 128.0f;
+			Bpix = (float) (*pLocalSrcU++) - 128.0f;
+
+			Gpix = (Bpix * 0.1873f) + (Rpix * 0.4681f);
+			Rpix *= 1.5748f;
+			Bpix *= 1.8556f;
+
+			*pLocalDst = (vx_uint8) fminf(fmaxf(Ypix + Rpix, 0.0f), 255.0f);
+			*(pLocalDst + 1) = (vx_uint8) fminf(fmaxf(Ypix - Gpix, 0.0f), 255.0f);
+			*(pLocalDst + 2) = (vx_uint8) fminf(fmaxf(Ypix + Bpix, 0.0f), 255.0f);
+
+			Ypix = (float) (*(pLocalSrcY + 1));
+			*(pLocalDst + 3) = (vx_uint8) fminf(fmaxf(Ypix + Rpix, 0.0f), 255.0f);
+			*(pLocalDst + 4) = (vx_uint8) fminf(fmaxf(Ypix - Gpix, 0.0f), 255.0f);
+			*(pLocalDst + 5) = (vx_uint8) fminf(fmaxf(Ypix + Bpix, 0.0f), 255.0f);
+
+			Ypix = (float) (*(pLocalSrcY + srcYImageStrideInBytes));
+			*(pLocalDst + dstImageStrideInBytes + 0) = (vx_uint8) fminf(fmaxf(Ypix + Rpix, 0.0f), 255.0f);
+			*(pLocalDst + dstImageStrideInBytes + 1) = (vx_uint8) fminf(fmaxf(Ypix - Gpix, 0.0f), 255.0f);
+			*(pLocalDst + dstImageStrideInBytes + 2) = (vx_uint8) fminf(fmaxf(Ypix + Bpix, 0.0f), 255.0f);
+
+			Ypix = (float) (*(pLocalSrcY + srcYImageStrideInBytes + 1));
+			*(pLocalDst + dstImageStrideInBytes + 3) = (vx_uint8) fminf(fmaxf(Ypix + Rpix, 0.0f), 255.0f);
+			*(pLocalDst + dstImageStrideInBytes + 4) = (vx_uint8) fminf(fmaxf(Ypix - Gpix, 0.0f), 255.0f);
+			*(pLocalDst + dstImageStrideInBytes + 5) = (vx_uint8) fminf(fmaxf(Ypix + Bpix, 0.0f), 255.0f);
+
+			pLocalSrcY += 2;
+			pLocalDst += 6;
+		}
+
+		pSrcYImage += (srcYImageStrideInBytes + srcYImageStrideInBytes);
+		pSrcUImage += srcUImageStrideInBytes;
+		pSrcVImage += srcVImageStrideInBytes;
+		pDstImage += (dstImageStrideInBytes + dstImageStrideInBytes);
+	}
+	return AGO_SUCCESS;
+}

@@ -1104,22 +1104,6 @@ int HafCpu_ColorConvert_RGB_YUYV
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_ColorConvert_RGB_IYUV
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_uint8    * pSrcYImage,
-		vx_uint32     srcYImageStrideInBytes,
-		vx_uint8    * pSrcUImage,
-		vx_uint32     srcUImageStrideInBytes,
-		vx_uint8    * pSrcVImage,
-		vx_uint32     srcVImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_ColorConvert_RGB_NV12
 	(
 		vx_uint32     dstWidth,
