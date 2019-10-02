@@ -796,6 +796,171 @@ int HafCpu_Magnitude_S16_S16S16
 	return AGO_SUCCESS;
 }
 
+int HafCpu_MeanStdDevMerge_DATA_DATA
+	(
+		vx_float32  * mean,
+		vx_float32  * stddev,
+		vx_uint32	  totalSampleCount,
+		vx_uint32     numPartitions,
+		vx_float32    partSum[],
+		vx_float32    partSumOfSquared[]
+	)
+{
+	vx_float32 lmean = 0, lstd = 0;
+
+	for (unsigned int i = 0; i < numPartitions; i++)
+	{
+		lmean += partSum[i];
+		lstd += partSumOfSquared[i];
+	}
+
+	lmean /= totalSampleCount;
+	lstd = sqrtf((lstd / totalSampleCount) - (lmean * lmean));
+
+	*mean = lmean;
+	*stddev = lstd;
+
+	return AGO_SUCCESS;
+}
+
+int HafCpu_MeanStdDev_DATA_U8
+	(
+		vx_float32  * pSum,
+		vx_float32  * pSumOfSquared,
+		vx_uint32     srcWidth,
+		vx_uint32     srcHeight,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+	unsigned char * pLocalSrc;
+#if ENABLE_MSA
+	v16i8 pixels, pixels_16, pixels_32, pixels_64;
+	v16i8 zeromask, sum, sum_squared;
+	zeromask = sum = sum_squared = __builtin_msa_ldi_b(0);
+
+	int prefixWidth = intptr_t(pSrcImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+	int postfixWidth = ((int) srcWidth - prefixWidth) & 15;
+	int alignedWidth = (int) srcWidth - prefixWidth - postfixWidth;
+	unsigned int prefixSum = 0, postfixSum = 0;
+	unsigned long long prefixSumSquared = 0, postfixSumSquared = 0;
+#else //	C
+	unsigned int sum = 0;
+	unsigned long long sum_squared = 0;
+#endif
+	int height = (int) srcHeight;
+	while (height)
+	{
+		pLocalSrc = (unsigned char *) pSrcImage;
+#if ENABLE_MSA
+		for (int x = 0; x < prefixWidth; x++, pLocalSrc++)
+		{
+			prefixSum += (unsigned int) *pLocalSrc;
+			prefixSumSquared += (unsigned long long)*pLocalSrc * (unsigned long long)*pLocalSrc;
+		}
+		// 16 pixels processed at a time
+		int width = (int) (alignedWidth >> 4);
+		while (width)
+		{
+			pixels = __builtin_msa_ld_b((void *) pLocalSrc, 0);
+
+			// 15, 14, 13, 12, 11, 10, 9, 8
+			pixels_16 = __builtin_msa_ilvl_b(zeromask, pixels);
+			// 15, 14, 13, 12
+			pixels_32 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) pixels_16);
+			// Pixels 15, 14, 13, 12
+			sum = (v16i8)__builtin_msa_addv_w((v4i32) sum, (v4i32) pixels_32);
+			// 15, 14
+			pixels_64 = (v16i8) __builtin_msa_ilvl_w((v4i32) zeromask, (v4i32) pixels_32);
+			// 13, 12
+			pixels_32 = (v16i8) __builtin_msa_ilvr_w((v4i32) zeromask, (v4i32) pixels_32);
+
+			// square
+			pixels_64 = (v16i8) __builtin_msa_mulv_w((v4i32) pixels_64, (v4i32) pixels_64);
+			pixels_32 = (v16i8) __builtin_msa_mulv_w((v4i32) pixels_32, (v4i32) pixels_32);
+			sum_squared = (v16i8) __builtin_msa_addv_d((v2i64) sum_squared, (v2i64) pixels_64);
+			sum_squared = (v16i8) __builtin_msa_addv_d((v2i64) sum_squared, (v2i64) pixels_32);
+
+			// Pixels 11, 10, 9, 8
+			pixels_32 = (v16i8) __builtin_msa_ilvr_h((v8i16) zeromask, (v8i16) pixels_16);
+			sum = (v16i8)__builtin_msa_addv_w((v4i32) sum, (v4i32) pixels_32);
+			// 11, 10
+			pixels_64 = (v16i8) __builtin_msa_ilvl_w((v4i32) zeromask, (v4i32) pixels_32);
+			// 9, 8
+			pixels_32 = (v16i8) __builtin_msa_ilvr_w((v4i32) zeromask, (v4i32) pixels_32);
+
+			// square
+			pixels_64 = (v16i8) __builtin_msa_mulv_w((v4i32) pixels_64, (v4i32) pixels_64);
+			pixels_32 = (v16i8) __builtin_msa_mulv_w((v4i32) pixels_32,(v4i32) pixels_32);
+			sum_squared = (v16i8) __builtin_msa_addv_d((v2i64) sum_squared, (v2i64) pixels_64);
+			sum_squared = (v16i8) __builtin_msa_addv_d((v2i64) sum_squared, (v2i64) pixels_32);
+
+			// 7, 6, 5, 4, 3, 2, 1, 0
+			pixels_16 = __builtin_msa_ilvr_b(zeromask, pixels);
+			// 7, 6, 5, 4
+			pixels_32 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) pixels_16);
+			// Pixels 7, 6, 5, 4
+			sum = (v16i8)__builtin_msa_addv_w((v4i32) sum, (v4i32) pixels_32);
+			// 7, 6
+			pixels_64 = (v16i8) __builtin_msa_ilvl_w((v4i32) zeromask, (v4i32) pixels_32);
+			// 5, 4
+			pixels_32 = (v16i8) __builtin_msa_ilvr_w((v4i32) zeromask, (v4i32) pixels_32);
+
+			// square
+			pixels_64 = (v16i8) __builtin_msa_mulv_w((v4i32) pixels_64, (v4i32) pixels_64);
+			pixels_32 = (v16i8) __builtin_msa_mulv_w((v4i32) pixels_32, (v4i32) pixels_32);
+			sum_squared = (v16i8) __builtin_msa_addv_d((v2i64) sum_squared, (v2i64) pixels_64);
+			sum_squared = (v16i8) __builtin_msa_addv_d((v2i64) sum_squared, (v2i64) pixels_32);
+
+			// Pixels 3, 2, 1, 0
+			pixels_32 = (v16i8) __builtin_msa_ilvr_h((v8i16) zeromask, (v8i16) pixels_16);
+			sum = (v16i8)__builtin_msa_addv_w((v4i32) sum, (v4i32) pixels_32);
+			// 3, 2
+			pixels_64 = (v16i8) __builtin_msa_ilvl_w((v4i32) zeromask, (v4i32) pixels_32);
+			// 1, 0
+			pixels_32 = (v16i8) __builtin_msa_ilvr_w((v4i32) zeromask, (v4i32) pixels_32);
+
+			// square
+			pixels_64 = (v16i8) __builtin_msa_mulv_w((v4i32) pixels_64, (v4i32) pixels_64);
+			pixels_32 = (v16i8) __builtin_msa_mulv_w((v4i32) pixels_32, (v4i32) pixels_32);
+			sum_squared = (v16i8) __builtin_msa_addv_d((v2i64) sum_squared, (v2i64) pixels_64);
+			sum_squared = (v16i8) __builtin_msa_addv_d((v2i64) sum_squared, (v2i64) pixels_32);
+
+			pLocalSrc += 16;
+			width--;
+		}
+
+		for (int x = 0; x < postfixWidth; x++, pLocalSrc++)
+		{
+			postfixSum += (unsigned int)*pLocalSrc;
+			postfixSumSquared += (unsigned long long)*pLocalSrc * (unsigned long long)*pLocalSrc;
+		}
+#else	// C
+		int width = (int) (srcWidth);
+		while (width)
+		{
+			sum += (unsigned int) *pLocalSrc;
+			sum_squared += (unsigned long long) *pLocalSrc * (unsigned long long) *pLocalSrc;
+
+			pLocalSrc += 1;
+			width--;
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		height--;
+	}
+#if ENABLE_MSA
+	sum = (v16i8) __builtin_msa_hadd_s_d((v4i32) sum, (v4i32) sum);
+	*pSum = (vx_float32) (__builtin_msa_copy_s_d((v2i64) sum,0) + __builtin_msa_copy_s_d((v2i64) sum, 1) + prefixSum + postfixSum);
+	*pSumOfSquared = (vx_float32) (__builtin_msa_copy_s_d((v2i64) sum_squared, 0) + __builtin_msa_copy_s_d((v2i64) sum_squared, 1) + prefixSumSquared + postfixSumSquared);
+#else	// C
+	*pSum = sum;
+	*pSumOfSquared = sum_squared;
+#endif
+	return AGO_SUCCESS;
+}
+
 int HafCpu_MinMaxMerge_DATA_DATA
 	(
 		vx_int32    * pDstMinValue,
