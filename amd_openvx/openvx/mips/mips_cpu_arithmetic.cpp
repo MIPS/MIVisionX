@@ -1236,6 +1236,147 @@ int HafCpu_Sub_S16_S16U8_Sat
 	return AGO_SUCCESS;
 }
 
+int HafCpu_Sub_S16_S16U8_Wrap
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_int16    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_uint8    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes
+	)
+{
+	vx_uint8 *pLocalSrc8;
+	vx_int16 *pLocalSrc16, *pLocalDst;
+
+#if ENABLE_MSA
+	v16i8 *pLocalSrc16_msa, *pLocalSrc8_msa, *pLocalDst_msa;
+	v16i8 pixels1H, pixels1L, pixels2H, pixels2L;
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		pLocalSrc16_msa = (v16i8 *) pSrcImage1;
+		pLocalSrc8_msa = (v16i8 *) pSrcImage2;
+		pLocalDst_msa = (v16i8 *) pDstImage;
+
+		for (int width = 0; width < alignedWidth; width += 16)
+		{
+			pixels1L = __builtin_msa_ld_b((void *) pLocalSrc16_msa++, 0);
+			pixels1H = __builtin_msa_ld_b((void *) pLocalSrc16_msa++, 0);
+			pixels2L = __builtin_msa_ld_b((void *) pLocalSrc8_msa++, 0);
+
+			pixels2H = __builtin_msa_ilvl_b(zeromask, pixels2L);
+			pixels2L = __builtin_msa_ilvr_b(zeromask, pixels2L);
+
+			pixels1L = (v16i8) __builtin_msa_subv_h((v8i16) pixels1L, (v8i16) pixels2L);
+			pixels1H = (v16i8) __builtin_msa_subv_h((v8i16) pixels1H, (v8i16) pixels2H);
+
+			__builtin_msa_st_b(pixels1L, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_b(pixels1H, (void *) pLocalDst_msa++, 0);
+		}
+
+		pLocalSrc16 = (vx_int16 *) pLocalSrc16_msa;
+		pLocalSrc8 = (vx_uint8 *) pLocalSrc8_msa;
+		pLocalDst = (vx_int16 *) pLocalDst_msa;
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			*pLocalDst++ = *pLocalSrc16++ - (vx_int16) (*pLocalSrc8++);
+		}
+
+#else	// C
+		pLocalSrc16 = (vx_int16 *) pSrcImage1;
+		pLocalSrc8 = (vx_uint8 *) pSrcImage2;
+		pLocalDst = (vx_int16 *) pDstImage;
+		for (int width = 0; width < dstWidth; width++)
+		{
+			*pLocalDst++ = *pLocalSrc16++ - (vx_int16) (*pLocalSrc8++);
+		}
+#endif
+		pSrcImage1 += (srcImage1StrideInBytes >> 1);
+		pSrcImage2 += srcImage2StrideInBytes;
+		pDstImage += (dstImageStrideInBytes >> 1);
+	}
+	return AGO_SUCCESS;
+}
+
+int HafCpu_Sub_S16_U8S16_Sat
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_int16    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes
+	)
+{
+	vx_uint8 *pLocalSrc8;
+	vx_int16 *pLocalSrc16, *pLocalDst;
+
+#if ENABLE_MSA
+	v16i8 *pLocalSrc16_msa, *pLocalSrc8_msa, *pLocalDst_msa;
+	v16i8 pixels1H, pixels1L, pixels2H, pixels2L;
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		pLocalSrc8_msa = (v16i8 *) pSrcImage1;
+		pLocalSrc16_msa = (v16i8 *) pSrcImage2;
+		pLocalDst_msa = (v16i8 *) pDstImage;
+
+		for (int width = 0; width < alignedWidth; width += 16)
+		{
+			pixels1L = __builtin_msa_ld_b((void *) pLocalSrc8_msa++, 0);
+			pixels2L = __builtin_msa_ld_b((void *) pLocalSrc16_msa++, 0);
+			pixels2H = __builtin_msa_ld_b((void *) pLocalSrc16_msa++, 0);
+			pixels1H = __builtin_msa_ilvl_b(zeromask, pixels1L);
+			pixels1L = __builtin_msa_ilvr_b(zeromask, pixels1L);
+			pixels1L = (v16i8) __builtin_msa_subs_s_h((v8i16) pixels1L, (v8i16) pixels2L);
+			pixels1H = (v16i8) __builtin_msa_subs_s_h((v8i16) pixels1H, (v8i16) pixels2H);
+			__builtin_msa_st_b(pixels1L, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_b(pixels1H, (void *) pLocalDst_msa++, 0);
+		}
+
+		pLocalSrc16 = (vx_int16 *) pLocalSrc16_msa;
+		pLocalSrc8 = (vx_uint8 *) pLocalSrc8_msa;
+		pLocalDst = (vx_int16 *) pLocalDst_msa;
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			vx_int32 temp = (vx_int32) (*pLocalSrc8++) - (vx_int32) (*pLocalSrc16++);
+			*pLocalDst++ = (vx_int16) max(min(temp, INT16_MAX), INT16_MIN);
+		}
+#else	// C
+		pLocalSrc16 = (vx_int16 *) pSrcImage2;
+		pLocalSrc8 = (vx_uint8 *) pSrcImage1;
+		pLocalDst = (vx_int16 *) pDstImage;
+
+		for (int width = 0; width < dstWidth; width++)
+		{
+			vx_int32 temp = (vx_int32) (*pLocalSrc8++) - (vx_int32) (*pLocalSrc16++);
+			*pLocalDst++ = (vx_int16) max(min(temp, INT16_MAX), INT16_MIN);
+		}
+#endif
+		pSrcImage1 += srcImage1StrideInBytes;
+		pSrcImage2 += (srcImage2StrideInBytes >> 1);
+		pDstImage += (dstImageStrideInBytes >> 1);
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Sub_S16_U8S16_Wrap
 	(
 		vx_uint32     dstWidth,
