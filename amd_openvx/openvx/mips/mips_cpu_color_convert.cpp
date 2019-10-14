@@ -31,14 +31,14 @@ DECL_ALIGN(16) unsigned char dataColorConvert[16 * 26] ATTR_ALIGN(16) = {
 };
 
 int HafCpu_ColorConvert_Y_RGB
-    (
-        vx_uint32     dstWidth,
-        vx_uint32     dstHeight,
-        vx_uint8    * pDstYImage,
-        vx_uint32     dstYImageStrideInBytes,
-        vx_uint8    * pSrcImage,
-        vx_uint32     srcImageStrideInBytes
-    )
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstYImage,
+		vx_uint32     dstYImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
 {
 #if ENABLE_MSA
 	v16i8 *tbl = (v16i8 *) dataColorConvert;
@@ -47,9 +47,9 @@ int HafCpu_ColorConvert_Y_RGB
 	v4f32 temp, Y;
 	v4u32 temp0_u, temp1_u;
 
-    v16i8 mask1 = __builtin_msa_ld_b(tbl + 21, 0);
-    v16i8 mask2 = __builtin_msa_ld_b(tbl + 22, 0);
-    v16i8 mask3 = __builtin_msa_ld_b(tbl + 23, 0);
+	v16i8 mask1 = __builtin_msa_ld_b(tbl + 21, 0);
+	v16i8 mask2 = __builtin_msa_ld_b(tbl + 22, 0);
+	v16i8 mask3 = __builtin_msa_ld_b(tbl + 23, 0);
 
 	float wR[4] = {0.2126f, 0.2126f, 0.2126f, 0.2126f};
 	float wG[4] = {0.7152f, 0.7152f, 0.7152f, 0.7152f};
@@ -127,7 +127,7 @@ int HafCpu_ColorConvert_Y_RGB
 			temp = __builtin_msa_fmul_w(temp, weights_G);
 			Y = __builtin_msa_fadd_w(Y, temp);
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) B);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			// B0..B3
 			temp = __builtin_msa_fmul_w(temp, weights_B);
@@ -140,26 +140,26 @@ int HafCpu_ColorConvert_Y_RGB
 			B = (v16u8) __builtin_msa_sldi_b((v16i8) B, (v16i8) B, 4);
 
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) R);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			// R4..R7
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			Y = __builtin_msa_fmul_w(temp, weights_R);
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) G);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			// G4..G7
 			temp = __builtin_msa_fmul_w(temp, weights_G);
 			Y = __builtin_msa_fadd_w(Y, temp);
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) B);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			// B4..B7
 			temp = __builtin_msa_fmul_w(temp, weights_B);
 			Y = __builtin_msa_fadd_w(Y, temp);
 			pixels1 = __builtin_msa_ftrunc_u_w(Y);
 			temp0_u = __builtin_msa_sat_u_w(pixels0, 15);
-            temp1_u = __builtin_msa_sat_u_w(pixels1, 15);
-            pixels0 = (v4u32) __builtin_msa_pckev_h((v8i16) temp1_u, (v8i16) temp0_u);
+			temp1_u = __builtin_msa_sat_u_w(pixels1, 15);
+			pixels0 = (v4u32) __builtin_msa_pckev_h((v8i16) temp1_u, (v8i16) temp0_u);
 
 			// For pixels 8..11
 			R = (v16u8) __builtin_msa_sldi_b((v16i8) R, (v16i8) R, 4);
@@ -167,18 +167,18 @@ int HafCpu_ColorConvert_Y_RGB
 			B = (v16u8) __builtin_msa_sldi_b((v16i8) B, (v16i8) B, 4);
 
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) R);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			// R8..R11
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			Y = __builtin_msa_fmul_w(temp, weights_R);
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) G);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			// G8..G11
 			temp = __builtin_msa_fmul_w(temp, weights_G);
 			Y = __builtin_msa_fadd_w(Y, temp);
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) B);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			// B8..B11
 			temp = __builtin_msa_fmul_w(temp, weights_B);
@@ -191,29 +191,29 @@ int HafCpu_ColorConvert_Y_RGB
 			B = (v16u8) __builtin_msa_sldi_b((v16i8) B, (v16i8) B, 4);
 
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) R);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			// R12..R15
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			Y = __builtin_msa_fmul_w(temp, weights_R);
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) G);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			// G12..G15
 			temp = __builtin_msa_fmul_w(temp, weights_G);
 			Y = __builtin_msa_fadd_w(Y, temp);
 			pixels2 = (v4u32) __builtin_msa_ilvr_b(zero, (v16i8) B);
-            pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
+			pixels2 = (v4u32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixels2);
 			temp = __builtin_msa_ffint_u_w(pixels2);
 			// B12..B15
 			temp = __builtin_msa_fmul_w(temp, weights_B);
 			Y = __builtin_msa_fadd_w(Y, temp);
 			pixels2 = __builtin_msa_ftrunc_u_w(Y);
 			temp0_u = __builtin_msa_sat_u_w(pixels1, 15);
-            temp1_u = __builtin_msa_sat_u_w(pixels2, 15);
-            pixels1 = (v4u32) __builtin_msa_pckev_h((v8i16) temp1_u, (v8i16) temp0_u);
+			temp1_u = __builtin_msa_sat_u_w(pixels2, 15);
+			pixels1 = (v4u32) __builtin_msa_pckev_h((v8i16) temp1_u, (v8i16) temp0_u);
 
 			temp0_u = (v4u32) __builtin_msa_sat_u_h((v8u16) pixels0, 7);
-            temp1_u = (v4u32) __builtin_msa_sat_u_h((v8u16) pixels1, 7);
+			temp1_u = (v4u32) __builtin_msa_sat_u_h((v8u16) pixels1, 7);
 			pixels0 = (v4u32) __builtin_msa_pckev_b((v16i8) temp1_u, (v16i8) temp0_u);
 			__builtin_msa_st_b((v16i8) pixels0, (void*) pLocalDst, 0);
 
@@ -555,5 +555,276 @@ int HafCpu_ColorConvert_RGBX_NV21
 		pSrcChromaImage += srcChromaImageStrideInBytes;
 		pDstImage += (dstImageStrideInBytes + dstImageStrideInBytes);
 	}
+	return AGO_SUCCESS;
+}
+
+int HafCpu_FormatConvert_IUV_UV12
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstUImage,
+		vx_uint32     dstUImageStrideInBytes,
+		vx_uint8    * pDstVImage,
+		vx_uint32     dstVImageStrideInBytes,
+		vx_uint8    * pSrcChromaImage,
+		vx_uint32     srcChromaImageStrideInBytes
+	)
+{
+	unsigned char *pLocalSrc, *pLocalDstU, *pLocalDstV;
+#if ENABLE_MSA
+	v16u8 *pLocalSrc_msa, *pLocalDstU_msa, *pLocalDstV_msa;
+	v16u8 pixels0, pixels1, temp;
+
+	int prefixWidth = intptr_t(pDstUImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+
+	// 16 pixels processed at a time in MSA loop
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
+#endif
+
+	int height = (int) dstHeight;
+	while (height)
+	{
+#if ENABLE_MSA
+		pLocalSrc = (unsigned char *) pSrcChromaImage;
+		pLocalDstU = (unsigned char *) pDstUImage;
+		pLocalDstV = (unsigned char *) pDstVImage;
+
+		for (int x = 0; x < prefixWidth; x++)
+		{
+			*pLocalDstU++ = *pLocalSrc++;
+			*pLocalDstV++ = *pLocalSrc++;
+		}
+		pLocalSrc_msa = (v16u8 *) pLocalSrc;
+		pLocalDstU_msa = (v16u8 *) pLocalDstU;
+		pLocalDstV_msa = (v16u8 *) pLocalDstV;
+
+		// 16 pixels processed at a time
+		int width = (int) (alignedWidth >> 4);
+		while (width)
+		{
+			pixels0 = (v16u8) __builtin_msa_ld_b(pLocalSrc_msa++, 0);
+			pixels1 = (v16u8) __builtin_msa_ld_b(pLocalSrc_msa++, 0);
+
+			temp = (v16u8) __builtin_msa_pckev_b((v16i8) pixels1, (v16i8) pixels0);
+			__builtin_msa_st_b((v16i8) temp, pLocalDstU_msa++, 0);
+
+			temp = (v16u8) __builtin_msa_pckod_b((v16i8) pixels1, (v16i8) pixels0);
+			__builtin_msa_st_b((v16i8) temp, pLocalDstV_msa++, 0);
+
+			width--;
+		}
+		pLocalSrc = (unsigned char *) pLocalSrc_msa;
+		pLocalDstU = (unsigned char *) pLocalDstU_msa;
+		pLocalDstV = (unsigned char *) pLocalDstV_msa;
+
+		for (int x = 0; x < postfixWidth; x++)
+		{
+			*pLocalDstU++ = *pLocalSrc++;
+			*pLocalDstV++ = *pLocalSrc++;
+		}
+#else // C
+		pLocalSrc = (unsigned char *) pSrcChromaImage;
+		pLocalDstU = (unsigned char *) pDstUImage;
+		pLocalDstV = (unsigned char *) pDstVImage;
+
+		for (int x = 0; x < dstWidth; x++)
+		{
+			*pLocalDstU++ = *pLocalSrc++;
+			*pLocalDstV++ = *pLocalSrc++;
+		}
+#endif
+		pSrcChromaImage += srcChromaImageStrideInBytes;
+		pDstUImage += dstUImageStrideInBytes;
+		pDstVImage += dstVImageStrideInBytes;
+		height--;
+	}
+
+	return AGO_SUCCESS;
+}
+
+int HafCpu_FormatConvert_UV12_IUV
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstChromaImage,
+		vx_uint32     dstChromaImageStrideInBytes,
+		vx_uint8    * pSrcUImage,
+		vx_uint32     srcUImageStrideInBytes,
+		vx_uint8    * pSrcVImage,
+		vx_uint32     srcVImageStrideInBytes
+	)
+{
+	unsigned char *pLocalSrcU, *pLocalSrcV, *pLocalDst;
+#if ENABLE_MSA
+	int prefixWidth = intptr_t(pDstChromaImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+	prefixWidth >>= 1; // 2 bytes = 1 pixel
+
+	// 16 pixels processed at a time in MSA loop
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
+
+	v16i8 *pLocalSrcU_msa, *pLocalSrcV_msa, *pLocalDst_msa;
+	v16i8 pixels_U, pixels_V, pixels_out;
+#endif
+
+	int height = (int) dstHeight;
+	while (height)
+	{
+#if ENABLE_MSA
+		pLocalSrcU = (unsigned char *) pSrcUImage;
+		pLocalSrcV = (unsigned char *) pSrcVImage;
+		pLocalDst = (unsigned char *) pDstChromaImage;
+
+		for (int x = 0; x < prefixWidth; x++)
+		{
+			*pLocalDst++ = *pLocalSrcU++;
+			*pLocalDst++ = *pLocalSrcV++;
+		}
+
+		pLocalSrcU_msa = (v16i8 *) pLocalSrcU;
+		pLocalSrcV_msa = (v16i8 *) pLocalSrcV;
+		pLocalDst_msa = (v16i8 *) pLocalDst;
+
+		// Each inner loop writes 16 pixels of each chroma plane in destination buffer
+		int width = (int) (dstWidth >> 4);
+		while (width)
+		{
+			pixels_U = __builtin_msa_ld_b(pLocalSrcU_msa++, 0);
+			pixels_V = __builtin_msa_ld_b(pLocalSrcV_msa++, 0);
+			pixels_out = __builtin_msa_ilvr_b(pixels_V, pixels_U);
+			pixels_U = __builtin_msa_ilvl_b(pixels_V, pixels_U);
+
+			__builtin_msa_st_b(pixels_out, pLocalDst_msa++, 0);
+			__builtin_msa_st_b(pixels_U, pLocalDst_msa++, 0);
+
+			width--;
+		}
+
+		pLocalSrcU = (unsigned char *) pLocalSrcU_msa;
+		pLocalSrcV = (unsigned char *) pLocalSrcV_msa;
+		pLocalDst = (unsigned char *) pLocalDst_msa;
+
+		for (int x = 0; x < postfixWidth; x++)
+		{
+			*pLocalDst++ = *pLocalSrcU++;
+			*pLocalDst++ = *pLocalSrcV++;
+		}
+#else // C
+		pLocalSrcU = (unsigned char *) pSrcUImage;
+		pLocalSrcV = (unsigned char *) pSrcVImage;
+		pLocalDst = (unsigned char *) pDstChromaImage;
+
+		for (int x = 0; x < dstWidth; x++)
+		{
+			*pLocalDst++ = *pLocalSrcU++;
+			*pLocalDst++ = *pLocalSrcV++;
+		}
+#endif
+		pSrcUImage += srcUImageStrideInBytes;
+		pSrcVImage += srcVImageStrideInBytes;
+		pDstChromaImage += dstChromaImageStrideInBytes;
+		height--;
+	}
+
+	return AGO_SUCCESS;
+}
+
+int HafCpu_FormatConvert_UV_UV12
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstUImage,
+		vx_uint32     dstUImageStrideInBytes,
+		vx_uint8    * pDstVImage,
+		vx_uint32     dstVImageStrideInBytes,
+		vx_uint8    * pSrcChromaImage,
+		vx_uint32     srcChromaImageStrideInBytes
+	)
+{
+	vx_uint8 *pLocalSrc, *pLocalDstUCurrentRow, *pLocalDstUNextRow, *pLocalDstVCurrentRow, *pLocalDstVNextRow;
+#if ENABLE_MSA
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = (int) dstWidth - alignedWidth;
+
+	v16i8 * tbl = (v16i8 *) dataColorConvert;
+	v16i8 pixels, U;
+	v16i8 maskU = __builtin_msa_ld_b(tbl + 6, 0);
+	v16i8 maskV = __builtin_msa_ld_b(tbl + 7, 0);
+#endif
+
+	// Each inner loop writes out two rows of dst buffer
+	int height = (int) (dstHeight >> 1);
+
+	while (height)
+	{
+#if ENABLE_MSA
+		pLocalSrc = pSrcChromaImage;
+		pLocalDstUCurrentRow = pDstUImage;
+		pLocalDstUNextRow = pDstUImage + dstUImageStrideInBytes;
+		pLocalDstVCurrentRow = pDstVImage;
+		pLocalDstVNextRow = pDstVImage + dstVImageStrideInBytes;
+
+		// Each inner loop iteration processess 16 output pixels
+		int width = (int) (alignedWidth >> 4);
+		while (width)
+		{
+			pixels = __builtin_msa_ld_b(pLocalSrc, 0);
+			U = __builtin_msa_vshf_b(maskU, pixels, pixels);
+			pixels = __builtin_msa_vshf_b(maskV, pixels, pixels);
+
+			__builtin_msa_st_b(U, pLocalDstUCurrentRow, 0);
+			__builtin_msa_st_b(U, pLocalDstUNextRow, 0);
+			__builtin_msa_st_b(pixels, pLocalDstVCurrentRow, 0);
+			__builtin_msa_st_b(pixels, pLocalDstVNextRow, 0);
+
+			pLocalSrc += 16;
+			pLocalDstUCurrentRow += 16;
+			pLocalDstUNextRow += 16;
+			pLocalDstVCurrentRow += 16;
+			pLocalDstVNextRow += 16;
+			width--;
+		}
+
+		for (int w = 0; w < postfixWidth; w += 2)
+		{
+			*pLocalDstUCurrentRow++ = *pLocalSrc;
+			*pLocalDstUCurrentRow++ = *pLocalSrc;
+			*pLocalDstUNextRow++ = *pLocalSrc;
+			*pLocalDstUNextRow++ = *pLocalSrc++;
+
+			*pLocalDstVCurrentRow++ = *pLocalSrc;
+			*pLocalDstVCurrentRow++ = *pLocalSrc;
+			*pLocalDstVNextRow++ = *pLocalSrc;
+			*pLocalDstVNextRow++ = *pLocalSrc++;
+		}
+#else // C
+		pLocalSrc = pSrcChromaImage;
+		pLocalDstUCurrentRow = pDstUImage;
+		pLocalDstUNextRow = pDstUImage + dstUImageStrideInBytes;
+		pLocalDstVCurrentRow = pDstVImage;
+		pLocalDstVNextRow = pDstVImage + dstVImageStrideInBytes;
+
+		for (int w = 0; w < dstWidth; w += 2)
+		{
+			*pLocalDstUCurrentRow++ = *pLocalSrc;
+			*pLocalDstUCurrentRow++ = *pLocalSrc;
+			*pLocalDstUNextRow++ = *pLocalSrc;
+			*pLocalDstUNextRow++ = *pLocalSrc++;
+
+			*pLocalDstVCurrentRow++ = *pLocalSrc;
+			*pLocalDstVCurrentRow++ = *pLocalSrc;
+			*pLocalDstVNextRow++ = *pLocalSrc;
+			*pLocalDstVNextRow++ = *pLocalSrc++;
+		}
+#endif
+		pSrcChromaImage += srcChromaImageStrideInBytes;
+		pDstUImage += (dstUImageStrideInBytes + dstUImageStrideInBytes);
+		pDstVImage += (dstVImageStrideInBytes + dstVImageStrideInBytes);
+		height--;
+	}
+
 	return AGO_SUCCESS;
 }
