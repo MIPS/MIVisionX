@@ -310,6 +310,154 @@ int HafCpu_ColorConvert_RGB_IYUV
 	return AGO_SUCCESS;
 }
 
+int HafCpu_ColorConvert_RGB_UYVY
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+#if ENABLE_MSA
+	int alignedWidth = dstWidth & ~7;
+	int postfixWidth = (int) dstWidth - alignedWidth;
+
+	v16i8 shufMask = {0, 1, 2, 4, 5, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+	v16i8 tempI, row;
+	v4f32 Y0, Y1, U, V;
+	v8u16 temp0_u, temp1_u;
+
+	// BT709 conversion factors
+	// x R G B, The most significant float is don't care
+	v4f32 weights_U2RGB = {0.0f, -0.1873f, 1.8556f, 0.0f};
+	// x R G B, The most significant float is don't care
+	v4f32 weights_V2RGB = {1.5748f, -0.4681f, 0.0f, 0.0f};
+	v4f32 const128 = {128.0f, 128.0f, 128.0f, 128.0f};
+	v4u32 mask_1110 = {0xFFFFFF00, 0xFFFFFF00, 0xFFFFFF00, 0xFFFFFF00};
+#endif
+
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+		vx_uint8 * pLocalSrc = pSrcImage;
+		vx_uint8 * pLocalDst = pDstImage;
+
+#if ENABLE_MSA
+		for (int width = 0; width < alignedWidth; width += 8)
+		{
+			row = __builtin_msa_ld_b(pLocalSrc, 0);
+
+			for (int i = 0; i < 4; i++)
+			{
+				tempI = __builtin_msa_vshf_b((v16i8) mask_1110, row, row);
+				// U U U U
+				U = __builtin_msa_ffint_s_w((v4i32) tempI);
+				U = __builtin_msa_fsub_w(U, const128);
+
+				row = __builtin_msa_sldi_b(row, row, 1);
+				tempI = __builtin_msa_vshf_b((v16i8) mask_1110, row, row);
+				// Y0 Y0 Y0 Y0
+				Y0 = __builtin_msa_ffint_s_w((v4i32) tempI);
+
+				row = __builtin_msa_sldi_b(row, row, 1);
+				tempI = __builtin_msa_vshf_b((v16i8) mask_1110, row, row);
+				// V V V V
+				V = __builtin_msa_ffint_s_w((v4i32) tempI);
+				V = __builtin_msa_fsub_w(V, const128);
+
+				row = __builtin_msa_sldi_b(row, row, 1);
+				tempI = __builtin_msa_vshf_b((v16i8) mask_1110, row, row);
+				// Y1 Y1 Y1 Y1
+				Y1 = __builtin_msa_ffint_s_w((v4i32) tempI);
+
+				row = __builtin_msa_sldi_b(row, row, 1);
+				U = __builtin_msa_fmul_w(U, weights_U2RGB);
+				V = __builtin_msa_fmul_w(V, weights_V2RGB);
+
+				// weights_U*U + weights_V*V
+				U = __builtin_msa_fadd_w(U, V);
+
+				// RGB for pixel 0
+				Y0 = __builtin_msa_fadd_w(Y0, U);
+
+				// RGB for pixel 1
+				Y1 = __builtin_msa_fadd_w(Y1, U);
+
+				// Convert RGB01 to U8
+				temp0_u = __builtin_msa_sat_u_h((v8u16) __builtin_msa_ftrunc_u_w(Y0), 15);
+				temp1_u = __builtin_msa_sat_u_h((v8u16) __builtin_msa_ftrunc_u_w(Y1), 15);
+				tempI = (v16i8) __builtin_msa_pckev_h((v8i16) temp1_u, (v8i16) temp0_u);
+
+				temp0_u = (v8u16)__builtin_msa_sat_u_h((v8u16) tempI, 7);
+				tempI = (v16i8) __builtin_msa_pckev_b((v16i8) temp0_u, (v16i8) temp0_u);
+
+				tempI = __builtin_msa_vshf_b((v16i8) shufMask, tempI, tempI);
+
+				__builtin_msa_st_b((v16i8) tempI, (void *) (pLocalDst + 6 * i), 0);
+			}
+
+			pLocalSrc += 16;
+			pLocalDst += 24;
+		}
+
+		for (int width = 0; width < postfixWidth; width += 2)
+		{
+			float Ypix1, Ypix2, Upix, Vpix, Rpix, Gpix, Bpix;
+			Upix = (float) (*pLocalSrc++) - 128.0f;
+			Ypix1 = (float) (*pLocalSrc++);
+			Vpix = (float) (*pLocalSrc++) - 128.0f;
+			Ypix2 = (float) (*pLocalSrc++);
+
+			Rpix = fminf(fmaxf(Ypix1 + (Vpix * 1.5748f), 0.0f), 255.0f);
+			Gpix = fminf(fmaxf(Ypix1 - (Upix * 0.1873f) - (Vpix * 0.4681f), 0.0f), 255.0f);
+			Bpix = fminf(fmaxf(Ypix1 + (Upix * 1.8556f), 0.0f), 255.0f);
+
+			*pLocalDst++ = (vx_uint8) Rpix;
+			*pLocalDst++ = (vx_uint8) Gpix;
+			*pLocalDst++ = (vx_uint8) Bpix;
+
+			Rpix = fminf(fmaxf(Ypix2 + (Vpix * 1.5748f), 0.0f), 255.0f);
+			Gpix = fminf(fmaxf(Ypix2 - (Upix * 0.1873f) - (Vpix * 0.4681f), 0.0f), 255.0f);
+			Bpix = fminf(fmaxf(Ypix2 + (Upix * 1.8556f), 0.0f), 255.0f);
+
+			*pLocalDst++ = (vx_uint8) Rpix;
+			*pLocalDst++ = (vx_uint8) Gpix;
+			*pLocalDst++ = (vx_uint8) Bpix;
+		}
+#else // C
+		for (int width = 0; width < dstWidth; width += 2)
+		{
+			float Ypix1, Ypix2, Upix, Vpix, Rpix, Gpix, Bpix;
+			Upix = (float) (*pLocalSrc++) - 128.0f;
+			Ypix1 = (float) (*pLocalSrc++);
+			Vpix = (float) (*pLocalSrc++) - 128.0f;
+			Ypix2 = (float) (*pLocalSrc++);
+
+			Rpix = fminf(fmaxf(Ypix1 + (Vpix * 1.5748f), 0.0f), 255.0f);
+			Gpix = fminf(fmaxf(Ypix1 - (Upix * 0.1873f) - (Vpix * 0.4681f), 0.0f), 255.0f);
+			Bpix = fminf(fmaxf(Ypix1 + (Upix * 1.8556f), 0.0f), 255.0f);
+
+			*pLocalDst++ = (vx_uint8) Rpix;
+			*pLocalDst++ = (vx_uint8) Gpix;
+			*pLocalDst++ = (vx_uint8) Bpix;
+
+			Rpix = fminf(fmaxf(Ypix2 + (Vpix * 1.5748f), 0.0f), 255.0f);
+			Gpix = fminf(fmaxf(Ypix2 - (Upix * 0.1873f) - (Vpix * 0.4681f), 0.0f), 255.0f);
+			Bpix = fminf(fmaxf(Ypix2 + (Upix * 1.8556f), 0.0f), 255.0f);
+
+			*pLocalDst++ = (vx_uint8) Rpix;
+			*pLocalDst++ = (vx_uint8) Gpix;
+			*pLocalDst++ = (vx_uint8) Bpix;
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+	}
+
+	return AGO_SUCCESS;
+}
+
 int HafCpu_ColorConvert_RGBX_IYUV
 	(
 		vx_uint32     dstWidth,
@@ -988,6 +1136,170 @@ int HafCpu_FormatConvert_UV_UV12
 		pDstUImage += (dstUImageStrideInBytes + dstUImageStrideInBytes);
 		pDstVImage += (dstVImageStrideInBytes + dstVImageStrideInBytes);
 		height--;
+	}
+
+	return AGO_SUCCESS;
+}
+
+int HafCpu_FormatConvert_IYUV_UYVY
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstYImage,
+		vx_uint32     dstYImageStrideInBytes,
+		vx_uint8    * pDstUImage,
+		vx_uint32     dstUImageStrideInBytes,
+		vx_uint8    * pDstVImage,
+		vx_uint32     dstVImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+	unsigned char *pLocalSrc, *pLocalDstY, *pLocalDstU, *pLocalDstV;
+	unsigned char *pLocalSrcNextRow, *pLocalDstYNextRow;
+#if ENABLE_MSA
+	v16i8 *tbl = (v16i8 *) dataColorConvert;
+	v16i8 maskY = __builtin_msa_ld_b(tbl, 0);
+	v16i8 maskU = __builtin_msa_ld_b(tbl + 1, 0);
+	v16i8 maskV = __builtin_msa_ld_b(tbl + 2, 0);
+	v16i8 pixels0, pixels1, pixels0_NextRow, pixels1_NextRow, temp0, temp1;
+
+	int prefixWidth = intptr_t(pDstYImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+
+	// 16 pixels processed at a time
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
+#endif
+
+	int height = (int) dstHeight;
+	while (height)
+	{
+#if ENABLE_MSA
+		pLocalSrc = (unsigned char *) pSrcImage;
+		pLocalSrcNextRow = (unsigned char *) pSrcImage + srcImageStrideInBytes;
+		pLocalDstY = (unsigned char *) pDstYImage;
+		pLocalDstYNextRow = (unsigned char *) pDstYImage + dstYImageStrideInBytes;
+		pLocalDstU = (unsigned char *) pDstUImage;
+		pLocalDstV = (unsigned char *) pDstVImage;
+
+		for (int x = 0; x < prefixWidth; x++)
+		{
+			*pLocalDstU++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;	// U
+			*pLocalDstY++ = *pLocalSrc++;					// Y
+			*pLocalDstYNextRow++ = *pLocalSrcNextRow++;			// Y - next row
+			*pLocalDstV++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;	// V
+			*pLocalDstY++ = *pLocalSrc++;					// Y
+			*pLocalDstYNextRow++ = *pLocalSrcNextRow++;			// Y - next row
+		}
+
+		// 16 pixels processed at a time
+		int width = alignedWidth >> 4;
+		while (width)
+		{
+			pixels0 = __builtin_msa_ld_b(pLocalSrc, 0);
+			pixels1 = __builtin_msa_ld_b((pLocalSrc + 16), 0);
+			pixels0_NextRow = __builtin_msa_ld_b(pLocalSrcNextRow, 0);
+			pixels1_NextRow = __builtin_msa_ld_b((pLocalSrcNextRow + 16), 0);
+
+			// Y plane, bytes 0..7
+			temp0 = __builtin_msa_vshf_b(maskY, pixels0, pixels0);
+			// Y plane, bytes 8..15
+			temp1 = __builtin_msa_vshf_b(maskY, pixels1, pixels1);
+			temp1 = __builtin_msa_sldi_b(temp1, temp1, 8);
+			temp0 = (v16i8) __builtin_msa_or_v((v16u8) temp0, (v16u8) temp1);
+			__builtin_msa_st_b(temp0, pLocalDstY, 0);
+
+			// Y plane - next row, bytes 8..15
+			temp1 = __builtin_msa_vshf_b(maskY, pixels1_NextRow, pixels1_NextRow);
+			temp1 = __builtin_msa_sldi_b(temp1, temp1, 8);
+			// Y plane - next row, bytes 0..7
+			temp0 = __builtin_msa_vshf_b(maskY, pixels0_NextRow, pixels0_NextRow);
+			temp0 = (v16i8) __builtin_msa_or_v((v16u8) temp0, (v16u8) temp1);
+			__builtin_msa_st_b(temp0, pLocalDstYNextRow, 0);
+
+			// U plane, intermideate bytes 4..7
+			temp1 = __builtin_msa_vshf_b(maskU, pixels1, pixels1);
+			// V plane, intermideate bytes 4..7
+			pixels1 = __builtin_msa_vshf_b(maskV, pixels1, pixels1);
+			temp1 = __builtin_msa_sldi_b(temp1, temp1, 12);
+			pixels1 = __builtin_msa_sldi_b(pixels1, pixels1, 12);
+
+			// U plane, intermideate bytes 0..3
+			temp0 = __builtin_msa_vshf_b(maskU, pixels0, pixels0);
+			// V plane, intermideate bytes 0..3
+			pixels0 = __builtin_msa_vshf_b(maskV, pixels0, pixels0);
+			// U plane, intermideate bytes 0..7
+			temp0 = (v16i8) __builtin_msa_or_v((v16u8) temp0, (v16u8) temp1);
+			// V plane, intermideate bytes 0..7
+			pixels0 = (v16i8) __builtin_msa_or_v((v16u8) pixels0, (v16u8) pixels1);
+
+			// U plane - next row, intermideate bytes 4..7
+			temp1 = __builtin_msa_vshf_b(maskU, pixels1_NextRow, pixels1_NextRow);
+			// V plane - next row, intermideate bytes 4..7
+			pixels1_NextRow = __builtin_msa_vshf_b(maskV, pixels1_NextRow, pixels1_NextRow);
+			temp1 = __builtin_msa_sldi_b(temp1, temp1, 12);
+			pixels1_NextRow = __builtin_msa_sldi_b(pixels1_NextRow, pixels1_NextRow, 12);
+
+			// U plane - next row, intermideate bytes 0..3
+			pixels1 = __builtin_msa_vshf_b(maskU, pixels0_NextRow, pixels0_NextRow);
+			// V plane - next row, intermideate bytes 0..3
+			pixels0_NextRow = __builtin_msa_vshf_b(maskV, pixels0_NextRow, pixels0_NextRow);
+			// U plane - next row, intermideate bytes 0..7
+			temp1 = (v16i8) __builtin_msa_or_v((v16u8) temp1, (v16u8) pixels1);
+			// V plane - next row, intermideate bytes 0..7
+			pixels0_NextRow = (v16i8) __builtin_msa_or_v((v16u8) pixels0_NextRow, (v16u8) pixels1_NextRow);
+
+			// U plane, bytes 0..7
+			temp0 = (v16i8) __builtin_msa_ave_u_b((v16u8) temp0, (v16u8) temp1);
+			*((long long *) pLocalDstU) = ((long long *) &temp0)[0];
+
+			// V plane, bytes 0..7
+			pixels0 = (v16i8) __builtin_msa_ave_u_b((v16u8) pixels0, (v16u8) pixels0_NextRow);
+			*((long long *) pLocalDstV) = ((long long *) &pixels0)[0];
+
+			pLocalSrc += 32;
+			pLocalSrcNextRow += 32;
+			pLocalDstY += 16;
+			pLocalDstYNextRow += 16;
+			pLocalDstU += 8;
+			pLocalDstV += 8;
+			width--;
+		}
+
+		for (int x = 0; x < postfixWidth; x++)
+		{
+			*pLocalDstU++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;	// U
+			*pLocalDstY++ = *pLocalSrc++;					// Y
+			*pLocalDstYNextRow++ = *pLocalSrcNextRow++;			// Y - next row
+			*pLocalDstV++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;	// V
+			*pLocalDstY++ = *pLocalSrc++;					// Y
+			*pLocalDstYNextRow++ = *pLocalSrcNextRow++;			// Y - next row
+		}
+#else // C
+		pLocalSrc = (unsigned char *) pSrcImage;
+		pLocalSrcNextRow = (unsigned char *) pSrcImage + srcImageStrideInBytes;
+		pLocalDstY = (unsigned char *) pDstYImage;
+		pLocalDstYNextRow = (unsigned char *) pDstYImage + dstYImageStrideInBytes;
+		pLocalDstU = (unsigned char *) pDstUImage;
+		pLocalDstV = (unsigned char *) pDstVImage;
+
+		for (int x = 0; x < dstWidth; x+=2)
+		{
+			*pLocalDstU++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;	// U
+			*pLocalDstY++ = *pLocalSrc++;					// Y
+			*pLocalDstYNextRow++ = *pLocalSrcNextRow++;			// Y - next row
+			*pLocalDstV++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;	// V
+			*pLocalDstY++ = *pLocalSrc++;					// Y
+			*pLocalDstYNextRow++ = *pLocalSrcNextRow++;			// Y - next row
+		}
+#endif
+		pSrcImage += (srcImageStrideInBytes + srcImageStrideInBytes);		// Advance by 2 rows
+		pDstYImage += (dstYImageStrideInBytes + dstYImageStrideInBytes);	// Advance by 2 rows
+		pDstUImage += dstUImageStrideInBytes;
+		pDstVImage += dstVImageStrideInBytes;
+
+		height -= 2;
 	}
 
 	return AGO_SUCCESS;
