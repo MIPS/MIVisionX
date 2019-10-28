@@ -1038,18 +1038,6 @@ int HafCpu_ColorConvert_RGB_RGBX
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_ColorConvert_RGB_YUYV
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_ColorConvert_RGBX_RGB
 	(
 		vx_uint32     dstWidth,
@@ -1111,22 +1099,6 @@ int HafCpu_ColorConvert_IYUV_RGB
 }
 
 int HafCpu_ColorConvert_IYUV_RGBX
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstYImage,
-		vx_uint32     dstYImageStrideInBytes,
-		vx_uint8    * pDstUImage,
-		vx_uint32     dstUImageStrideInBytes,
-		vx_uint8    * pDstVImage,
-		vx_uint32     dstVImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
-int HafCpu_FormatConvert_IYUV_YUYV
 	(
 		vx_uint32     dstWidth,
 		vx_uint32     dstHeight,
