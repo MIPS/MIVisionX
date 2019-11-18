@@ -925,6 +925,36 @@ int HafCpu_ColorConvert_RGBX_RGB
 	return AGO_SUCCESS;
 }
 
+int HafCpu_ColorConvert_RGB_RGBX
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+		vx_uint8 * pLocalSrc = (vx_uint8 *) pSrcImage;
+		vx_uint8 * pLocalDst = (vx_uint8 *) pDstImage;
+
+		for (int width = 0; width < (int) dstWidth; width++)
+		{
+			*pLocalDst++ = *pLocalSrc++;
+			*pLocalDst++ = *pLocalSrc++;
+			*pLocalDst++ = *pLocalSrc++;
+			pLocalSrc++;
+		}
+
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_ColorConvert_IYUV_RGB
 	(
 		vx_uint32     dstWidth,
@@ -987,6 +1017,80 @@ int HafCpu_ColorConvert_IYUV_RGB
 			*pLocalDstV++ = (vx_uint8) V;
 
 			pLocalSrc += 6;
+			pLocalDstY += 2;
+		}
+
+		pSrcImage += (srcImageStrideInBytes + srcImageStrideInBytes);
+		pDstYImage += (dstYImageStrideInBytes + dstYImageStrideInBytes);
+		pDstUImage += dstUImageStrideInBytes;
+		pDstVImage += dstVImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
+
+int HafCpu_ColorConvert_IYUV_RGBX
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstYImage,
+		vx_uint32     dstYImageStrideInBytes,
+		vx_uint8    * pDstUImage,
+		vx_uint32     dstUImageStrideInBytes,
+		vx_uint8    * pDstVImage,
+		vx_uint32     dstVImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+
+	for (int height = 0; height < (int) dstHeight; height += 2)
+	{
+		vx_uint8 * pLocalSrc = pSrcImage;
+		vx_uint8 * pLocalDstY = pDstYImage;
+		vx_uint8 * pLocalDstU = pDstUImage;
+		vx_uint8 * pLocalDstV = pDstVImage;
+
+
+		for (int width = 0; width < (int) dstWidth; width += 2)
+		{
+			float R = (float) *(pLocalSrc);
+			float G = (float) *(pLocalSrc + 1);
+			float B = (float) *(pLocalSrc + 2);
+
+			*pLocalDstY = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
+			float U = (R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f;
+			float V = (R * 0.5f) + (G * -0.4542f) + (B * -0.0458f) + 128.0f;
+
+			R = (float) *(pLocalSrc + 4);
+			G = (float) *(pLocalSrc + 5);
+			B = (float) *(pLocalSrc + 6);
+
+			*(pLocalDstY + 1) = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
+			U += ((R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f);
+			V += ((R * 0.5f) + (G * -0.4542f) + (B * -0.0458f) + 128.0f);
+
+			R = (float) *(pLocalSrc + srcImageStrideInBytes);
+			G = (float) *(pLocalSrc + srcImageStrideInBytes + 1);
+			B = (float) *(pLocalSrc + srcImageStrideInBytes + 2);
+
+			*(pLocalDstY + dstYImageStrideInBytes) = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
+			U += ((R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f);
+			V += ((R * 0.5f) + (G * -0.4542f) + (B * -0.0458f) + 128.0f);
+
+			R = (float) *(pLocalSrc + srcImageStrideInBytes + 4);
+			G = (float) *(pLocalSrc + srcImageStrideInBytes + 5);
+			B = (float) *(pLocalSrc + srcImageStrideInBytes + 6);
+
+			*(pLocalDstY + dstYImageStrideInBytes + 1) = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
+			U += ((R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f);
+			V += ((R * 0.5f) + (G * -0.4542f) + (B * -0.0458f) + 128.0f);
+
+			U /= 4.0f;	V /= 4.0f;
+
+			*pLocalDstU++ = (vx_uint8) U;
+			*pLocalDstV++ = (vx_uint8) V;
+
+			pLocalSrc += 8;
 			pLocalDstY += 2;
 		}
 
@@ -1066,6 +1170,75 @@ int HafCpu_ColorConvert_NV12_RGB
 	return AGO_SUCCESS;
 }
 
+int HafCpu_ColorConvert_NV12_RGBX
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstLumaImage,
+		vx_uint32     dstLumaImageStrideInBytes,
+		vx_uint8    * pDstChromaImage,
+		vx_uint32     dstChromaImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+
+	for (int height = 0; height < (int) dstHeight; height += 2)
+	{
+		vx_uint8 * pLocalSrc = pSrcImage;
+		vx_uint8 * pLocalDstLuma = pDstLumaImage;
+		vx_uint8 * pLocalDstChroma = pDstChromaImage;
+
+		for (int width = 0; width < (int) dstWidth; width += 2)
+		{
+			float R = (float)*(pLocalSrc);
+			float G = (float)*(pLocalSrc + 1);
+			float B = (float)*(pLocalSrc + 2);
+
+			*pLocalDstLuma = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
+			float U = (R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f;
+			float V = (R * 0.5f) + (G * -0.4542f) + (B * -0.0458f) + 128.0f;
+
+			R = (float)*(pLocalSrc + 4);
+			G = (float)*(pLocalSrc + 5);
+			B = (float)*(pLocalSrc + 6);
+
+			*(pLocalDstLuma + 1) = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
+			U += ((R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f);
+			V += ((R * 0.5f) + (G * -0.4542f) + (B * -0.0458f) + 128.0f);
+
+			R = (float)*(pLocalSrc + srcImageStrideInBytes);
+			G = (float)*(pLocalSrc + srcImageStrideInBytes + 1);
+			B = (float)*(pLocalSrc + srcImageStrideInBytes + 2);
+
+			*(pLocalDstLuma + dstLumaImageStrideInBytes) = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
+			U += ((R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f);
+			V += ((R * 0.5f) + (G * -0.4542f) + (B * -0.0458f) + 128.0f);
+
+			R = (float)*(pLocalSrc + srcImageStrideInBytes + 4);
+			G = (float)*(pLocalSrc + srcImageStrideInBytes + 5);
+			B = (float)*(pLocalSrc + srcImageStrideInBytes + 6);
+
+			*(pLocalDstLuma + dstLumaImageStrideInBytes + 1) = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
+			U += ((R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f);
+			V += ((R * 0.5f) + (G * -0.4542f) + (B * -0.0458f) + 128.0f);
+
+			U /= 4.0f;	V /= 4.0f;
+
+			*pLocalDstChroma++ = (vx_uint8) U;
+			*pLocalDstChroma++ = (vx_uint8) V;
+
+			pLocalSrc += 8;
+			pLocalDstLuma += 2;
+		}
+
+		pSrcImage += (srcImageStrideInBytes + srcImageStrideInBytes);
+		pDstLumaImage += (dstLumaImageStrideInBytes + dstLumaImageStrideInBytes);
+		pDstChromaImage += dstChromaImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
+
 int HafCpu_ColorConvert_YUV4_RGB
 	(
 		vx_uint32     dstWidth,
@@ -1093,6 +1266,48 @@ int HafCpu_ColorConvert_YUV4_RGB
 			float R = (float) *pLocalSrc++;
 			float G = (float) *pLocalSrc++;
 			float B = (float) *pLocalSrc++;
+
+			*pLocalDstY++ = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
+			*pLocalDstU++ = (vx_uint8) ((R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f);
+			*pLocalDstV++ = (vx_uint8) ((R * 0.5f) + (G * -0.4542f) + (B * -0.0458f) + 128.0f);
+		}
+
+		pSrcImage += srcImageStrideInBytes;
+		pDstYImage += dstYImageStrideInBytes;
+		pDstUImage += dstUImageStrideInBytes;
+		pDstVImage += dstVImageStrideInBytes;
+	}
+	return AGO_SUCCESS;
+}
+
+int HafCpu_ColorConvert_YUV4_RGBX
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstYImage,
+		vx_uint32     dstYImageStrideInBytes,
+		vx_uint8    * pDstUImage,
+		vx_uint32     dstUImageStrideInBytes,
+		vx_uint8    * pDstVImage,
+		vx_uint32     dstVImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+		vx_uint8 * pLocalSrc = pSrcImage;
+		vx_uint8 * pLocalDstY = pDstYImage;
+		vx_uint8 * pLocalDstU = pDstUImage;
+		vx_uint8 * pLocalDstV = pDstVImage;
+
+		for (int width = 0; width < (int) dstWidth; width++)
+		{
+			float R = (float) *pLocalSrc++;
+			float G = (float) *pLocalSrc++;
+			float B = (float) *pLocalSrc++;
+			pLocalSrc++;
 
 			*pLocalDstY++ = (vx_uint8) ((R * 0.2126f) + (G * 0.7152f) + (B * 0.0722f));
 			*pLocalDstU++ = (vx_uint8) ((R * -0.1146f) + (G * -0.3854f) + (B * 0.5f) + 128.0f);
