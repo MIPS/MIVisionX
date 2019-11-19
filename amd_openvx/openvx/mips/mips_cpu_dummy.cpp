@@ -821,20 +821,6 @@ int HafCpu_AccumulateSquared_S16_S16U8_Sat
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_Sub_S16_S16S16_Wrap
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_int16    * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_int16    * pSrcImage1,
-		vx_uint32     srcImage1StrideInBytes,
-		vx_int16    * pSrcImage2,
-		vx_uint32     srcImage2StrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_Mul_S16_S16S16_Wrap_Trunc
 	(
 		vx_uint32     dstWidth,

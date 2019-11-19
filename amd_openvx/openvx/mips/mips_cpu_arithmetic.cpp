@@ -1597,6 +1597,76 @@ int HafCpu_Sub_S16_S16S16_Sat
 	return AGO_SUCCESS;
 }
 
+int HafCpu_Sub_S16_S16S16_Wrap
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_int16    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_int16    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes
+	)
+{
+	vx_int16 *pLocalSrc1, *pLocalSrc2, *pLocalDst;
+#if ENABLE_MSA
+	v8i16 *pLocalSrc1_msa, *pLocalSrc2_msa, *pLocalDst_msa;
+	v8i16 pixels1, pixels2, pixels3, pixels4;
+	v8i16 zeromask = __builtin_msa_ldi_h(0);
+
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		pLocalSrc1_msa = (v8i16 *) pSrcImage1;
+		pLocalSrc2_msa = (v8i16 *) pSrcImage2;
+		pLocalDst_msa = (v8i16 *) pDstImage;
+
+		for (int width = 0; width < alignedWidth; width += 16)
+		{
+			pixels1 = __builtin_msa_ld_h((void *) pLocalSrc1_msa++, 0);
+			pixels2 = __builtin_msa_ld_h((void *) pLocalSrc1_msa++, 0);
+			pixels3 = __builtin_msa_ld_h((void *) pLocalSrc2_msa++, 0);
+			pixels4 = __builtin_msa_ld_h((void *) pLocalSrc2_msa++, 0);
+
+			pixels1 = __builtin_msa_subv_h(pixels1, pixels3);
+			pixels2 = __builtin_msa_subv_h(pixels2, pixels4);
+
+			__builtin_msa_st_h(pixels1, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_h(pixels2, (void *) pLocalDst_msa++, 0);
+		}
+
+		pLocalSrc1 = (vx_int16 *) pLocalSrc1_msa;
+		pLocalSrc2 = (vx_int16 *) pLocalSrc2_msa;
+		pLocalDst = (vx_int16 *) pLocalDst_msa;
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			vx_int32 temp = (vx_int32) (*pLocalSrc1++) - (vx_int32) (*pLocalSrc2++);
+			*pLocalDst++ = (vx_int16) temp;
+		}
+#else // C
+		pLocalSrc1 = (vx_int16 *) pSrcImage1;
+		pLocalSrc2 = (vx_int16 *) pSrcImage2;
+		pLocalDst = (vx_int16 *) pDstImage;
+
+		for (int width = 0; width < dstWidth; width++)
+		{
+			vx_int32 temp = (vx_int32) (*pLocalSrc1++) - (vx_int32) (*pLocalSrc2++);
+			*pLocalDst++ = (vx_int16) temp;
+		}
+#endif
+		pSrcImage1 += (srcImage1StrideInBytes >> 1);
+		pSrcImage2 += (srcImage2StrideInBytes >> 1);
+		pDstImage += (dstImageStrideInBytes >> 1);
+	}
+
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Threshold_U1_U8_Binary
 	(
 		vx_uint32     dstWidth,
