@@ -983,34 +983,6 @@ int HafCpu_ChannelExtract_U8U8U8U8_U32
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_FormatConvert_NV12_UYVY
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstLumaImage,
-		vx_uint32     dstLumaImageStrideInBytes,
-		vx_uint8    * pDstChromaImage,
-		vx_uint32     dstChromaImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
-int HafCpu_FormatConvert_NV12_YUYV
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstLumaImage,
-		vx_uint32     dstLumaImageStrideInBytes,
-		vx_uint8    * pDstChromaImage,
-		vx_uint32     dstChromaImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_ColorConvert_Y_RGBX
 	(
 		vx_uint32     dstWidth,
