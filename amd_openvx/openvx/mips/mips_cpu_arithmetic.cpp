@@ -1874,3 +1874,83 @@ int HafCpu_Mul_U8_U8U8_Wrap_Trunc
 
 	return AGO_SUCCESS;
 }
+
+int HafCpu_ColorDepth_U8_S16_Wrap
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_int16    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes,
+		vx_int32      shift
+	)
+{
+#if ENABLE_MSA
+	int prefixWidth = intptr_t(pDstImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
+
+	v8i16 shift_v = __builtin_msa_fill_h(shift);
+	v16i8 maskL = {(char) 0x0,  (char) 0x02, (char) 0x04, (char) 0x06,
+				   (char) 0x08, (char) 0x0A, (char) 0x0C, (char) 0x0E,
+				   (char) 0xFF, (char) 0xFF, (char) 0xFF, (char) 0xFF,
+				   (char) 0xFF, (char) 0xFF, (char) 0xFF, (char) 0xFF};
+	v16i8 maskH = {(char) 0xFF, (char) 0xFF, (char) 0xFF, (char) 0xFF,
+				   (char) 0xFF, (char) 0xFF, (char) 0xFF, (char) 0xFF,
+				   (char) 0x0,  (char) 0x02, (char) 0x04, (char) 0x06,
+				   (char) 0x08, (char) 0x0A, (char) 0x0C, (char) 0x0E};
+	v16i8 pixels1, pixels2;
+#endif
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		vx_int16 * pLocalSrc = pSrcImage;
+		vx_uint8 * pLocalDst = pDstImage;
+
+		for (int width = 0; width < prefixWidth; width++)
+		{
+			int pix = (int) (*pLocalSrc++);
+			*pLocalDst++ = (vx_uint8) ((pix >> shift) & 0xFF);
+		}
+
+		for (int width = 0; width < alignedWidth; width += 16)
+		{
+			pixels1 = __builtin_msa_ld_b(pLocalSrc, 0);
+			pixels2 = __builtin_msa_ld_b((pLocalSrc + 8), 0);
+
+			pixels1 = (v16i8) __builtin_msa_sra_h((v8i16) pixels1, shift_v);
+			pixels2 = (v16i8) __builtin_msa_sra_h((v8i16) pixels2, shift_v);
+
+			pixels1 = __builtin_msa_vshf_b(maskL, (v16i8) pixels1, (v16i8) pixels1);
+			pixels2 = __builtin_msa_vshf_b(maskH, (v16i8) pixels2, (v16i8) pixels2);
+
+			pixels1 = (v16i8) __builtin_msa_or_v((v16u8) pixels1, (v16u8) pixels2);
+			__builtin_msa_st_b(pixels1, (void *) pLocalDst, 0);
+
+			pLocalSrc += 16;
+			pLocalDst += 16;
+		}
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			int pix = *pLocalSrc++;
+			*pLocalDst++ = (vx_uint8) ((pix >> shift) & 0xFF);
+		}
+#else // C
+		vx_int16 * pLocalSrc = pSrcImage;
+		vx_uint8 * pLocalDst = pDstImage;
+
+		for (int width = 0; width < dstWidth; width++)
+		{
+			int pix = *pLocalSrc++;
+			*pLocalDst++ = (vx_uint8) ((pix >> shift) & 0xFF);
+		}
+#endif
+		pSrcImage += (srcImageStrideInBytes >> 1);
+		pDstImage += dstImageStrideInBytes;
+	}
+
+	return AGO_SUCCESS;
+}

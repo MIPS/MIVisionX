@@ -145,19 +145,6 @@ int HafCpu_ThresholdNot_U1_U8_Range
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_ColorDepth_U8_S16_Wrap
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_int16    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes,
-		vx_int32      shift
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_ColorDepth_U8_S16_Sat
 	(
 		vx_uint32     dstWidth,
