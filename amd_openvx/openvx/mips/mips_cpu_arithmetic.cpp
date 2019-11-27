@@ -1954,3 +1954,71 @@ int HafCpu_ColorDepth_U8_S16_Wrap
 
 	return AGO_SUCCESS;
 }
+
+int HafCpu_Accumulate_S16_S16U8_Sat
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+	vx_uint8 *pLocalSrc;
+	vx_int16 *pLocalDst;
+
+#if ENABLE_MSA
+	v16i8 *pLocalSrc_msa, *pLocalDst_msa;
+	v16i8 resultL, resultH, pixelsL, pixelsH;
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		pLocalSrc_msa = (v16i8 *) pSrcImage;
+		pLocalDst_msa = (v16i8 *) pDstImage;
+
+		for (int width = 0; width < alignedWidth; width += 16)
+		{
+			resultL = __builtin_msa_ld_b(pLocalDst_msa, 0);
+			resultH = __builtin_msa_ld_b((pLocalDst_msa + 1), 0);
+			pixelsL = __builtin_msa_ld_b(pLocalSrc_msa++, 0);
+
+			pixelsH = __builtin_msa_ilvl_b(zeromask, (v16i8) pixelsL);
+			pixelsL = __builtin_msa_ilvr_b(zeromask, (v16i8) pixelsL);
+
+			resultL = (v16i8) __builtin_msa_adds_s_h((v8i16) resultL, (v8i16) pixelsL);
+			resultH = (v16i8) __builtin_msa_adds_s_h((v8i16) resultH, (v8i16) pixelsH);
+
+			__builtin_msa_st_b(resultL, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_b(resultH, (void *) pLocalDst_msa++, 0);
+		}
+
+		pLocalSrc = (vx_uint8 *) pLocalSrc_msa;
+		pLocalDst = (vx_int16 *) pLocalDst_msa;
+
+		for (int width = 0; width < postfixWidth; width++, pLocalSrc++)
+		{
+			vx_int32 temp = (vx_int32) *pLocalDst + (vx_int32) *pLocalSrc;
+			*pLocalDst++ = (vx_int16) max(min(temp, INT16_MAX), INT16_MIN);
+		}
+#else // C
+		pLocalSrc = (vx_uint8 *) pSrcImage;
+		pLocalDst = (vx_int16 *) pDstImage;
+
+		for (int width = 0; width < dstWidth; width++, pLocalSrc++)
+		{
+			vx_int32 temp = (vx_int32) *pLocalDst + (vx_int32) *pLocalSrc;
+			*pLocalDst++ = (vx_int16) max(min(temp, INT16_MAX), INT16_MIN);
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += (dstImageStrideInBytes >> 1);
+	}
+
+	return AGO_SUCCESS;
+}
