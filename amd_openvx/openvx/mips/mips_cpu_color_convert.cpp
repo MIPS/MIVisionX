@@ -1370,6 +1370,51 @@ int HafCpu_FormatConvert_NV12_UYVY
 	return AGO_SUCCESS;
 }
 
+int HafCpu_FormatConvert_NV12_YUYV
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstLumaImage,
+		vx_uint32     dstLumaImageStrideInBytes,
+		vx_uint8    * pDstChromaImage,
+		vx_uint32     dstChromaImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+	unsigned char *pLocalSrc, *pLocalDstLuma, *pLocalDstChroma;
+	unsigned char *pLocalSrcNextRow, *pLocalDstLumaNextRow;
+
+	int height = (int) dstHeight;
+	while (height > 0)
+	{
+		pLocalSrc = (unsigned char *) pSrcImage;
+		pLocalDstLuma = (unsigned char *) pDstLumaImage;
+		pLocalDstChroma = (unsigned char *) pDstChromaImage;
+		pLocalSrcNextRow = (unsigned char *) pSrcImage + srcImageStrideInBytes;
+		pLocalDstLumaNextRow = (unsigned char *) pDstLumaImage + dstLumaImageStrideInBytes;
+
+
+		for (int x = 0; x < (int) dstWidth; x += 2)
+		{
+			*pLocalDstLuma++ = *pLocalSrc++;						// Y
+			*pLocalDstLumaNextRow++ = *pLocalSrcNextRow++;					// Y - next row
+			*pLocalDstChroma++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;			// U
+			*pLocalDstLuma++ = *pLocalSrc++;						// Y
+			*pLocalDstLumaNextRow++ = *pLocalSrcNextRow++;					// Y - next row
+			*pLocalDstChroma++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;			// V
+		}
+
+		pSrcImage += (srcImageStrideInBytes + srcImageStrideInBytes);				// Advance by 2 rows
+		pDstLumaImage += (dstLumaImageStrideInBytes + dstLumaImageStrideInBytes);		// Advance by 2 rows
+		pDstChromaImage += dstChromaImageStrideInBytes;
+
+		height -= 2;
+	}
+
+	return AGO_SUCCESS;
+}
+
 int HafCpu_ColorConvert_YUV4_RGB
 	(
 		vx_uint32     dstWidth,
