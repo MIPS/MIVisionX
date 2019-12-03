@@ -1253,18 +1253,29 @@ int HafCpu_FormatConvert_NV12_UYVY
 {
 	unsigned char *pLocalSrc, *pLocalDstLuma, *pLocalDstChroma;
 	unsigned char *pLocalSrcNextRow, *pLocalDstLumaNextRow;
+#if ENABLE_MSA
+	v16i8 *tbl = (v16i8 *) dataColorConvert;
+	v16i8 maskLuma = __builtin_msa_ld_b(tbl, 0);
+	v16i8 maskChroma = __builtin_msa_ld_b(tbl + 3, 0);
+	v16i8 pixels0, pixels1, pixels0_NextRow, pixels1_NextRow, temp0, temp1;
 
+	// Optimized routine for both dst images at same alignment
+	int prefixWidth = intptr_t(pDstLumaImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
+#endif
 	int height = (int) dstHeight;
 	while (height > 0)
 	{
+#if ENABLE_MSA
 		pLocalSrc = (unsigned char *) pSrcImage;
 		pLocalDstLuma = (unsigned char *) pDstLumaImage;
 		pLocalDstChroma = (unsigned char *) pDstChromaImage;
 		pLocalSrcNextRow = (unsigned char *) pSrcImage + srcImageStrideInBytes;
 		pLocalDstLumaNextRow = (unsigned char *) pDstLumaImage + dstLumaImageStrideInBytes;
 
-
-		for (int x = 0; x < (int) dstWidth; x += 2)
+		for (int x = 0; x < prefixWidth; x += 2)
 		{
 			*pLocalDstChroma++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;			// U
 			*pLocalDstLuma++ = *pLocalSrc++;						// Y
@@ -1274,51 +1285,81 @@ int HafCpu_FormatConvert_NV12_UYVY
 			*pLocalDstLumaNextRow++ = *pLocalSrcNextRow++;					// Y - next row
 		}
 
-		pSrcImage += (srcImageStrideInBytes + srcImageStrideInBytes);				// Advance by 2 rows
-		pDstLumaImage += (dstLumaImageStrideInBytes + dstLumaImageStrideInBytes);		// Advance by 2 rows
-		pDstChromaImage += dstChromaImageStrideInBytes;
+		// 16 pixels processed at a time
+		int width = alignedWidth >> 4;
+		while (width)
+		{
+			pixels0 = __builtin_msa_ld_b(pLocalSrc, 0);
+			pixels1 = __builtin_msa_ld_b((pLocalSrc + 16), 0);
+			pixels0_NextRow = __builtin_msa_ld_b(pLocalSrcNextRow, 0);
+			pixels1_NextRow = __builtin_msa_ld_b((pLocalSrcNextRow + 16), 0);
 
-		height -= 2;
-	}
+			// Y plane, bytes 0..7
+			temp0 = __builtin_msa_vshf_b(maskLuma, (v16i8) pixels0, (v16i8) pixels0);
+			// Y plane, bytes 8..15
+			temp1 = __builtin_msa_vshf_b(maskLuma, (v16i8) pixels1, (v16i8) pixels1);
+			temp1 = __builtin_msa_sldi_b((v16i8) temp1, (v16i8) temp1, 8);
+			temp0 = (v16i8) __builtin_msa_or_v((v16u8) temp0, (v16u8) temp1);
+			__builtin_msa_st_b(temp0, pLocalDstLuma, 0);
 
-	return AGO_SUCCESS;
-}
+			// Y plane - next row, bytes 8..15
+			temp1 = __builtin_msa_vshf_b(maskLuma, (v16i8) pixels1_NextRow, (v16i8) pixels1_NextRow);
+			temp1 = __builtin_msa_sldi_b((v16i8) temp1, (v16i8) temp1, 8);
+			// Y plane - next row, bytes 0..7
+			temp0 = __builtin_msa_vshf_b(maskLuma, (v16i8) pixels0_NextRow, (v16i8) pixels0_NextRow);
+			temp0 = (v16i8) __builtin_msa_or_v((v16u8) temp0, (v16u8) temp1);
+			__builtin_msa_st_b(temp0, pLocalDstLumaNextRow, 0);
 
-int HafCpu_FormatConvert_NV12_YUYV
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstLumaImage,
-		vx_uint32     dstLumaImageStrideInBytes,
-		vx_uint8    * pDstChromaImage,
-		vx_uint32     dstChromaImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	)
-{
-	unsigned char *pLocalSrc, *pLocalDstLuma, *pLocalDstChroma;
-	unsigned char *pLocalSrcNextRow, *pLocalDstLumaNextRow;
+			// Chroma plane, bytes 0..7
+			pixels0 = __builtin_msa_vshf_b(maskChroma, (v16i8) pixels0, (v16i8) pixels0);
+			// Chroma plane - Next row, bytes 0..7
+			pixels0_NextRow = __builtin_msa_vshf_b(maskChroma, (v16i8) pixels0_NextRow, (v16i8) pixels0_NextRow);
+			// Chroma plane, bytes 8..15
+			pixels1 = __builtin_msa_vshf_b(maskChroma, (v16i8) pixels1, (v16i8) pixels1);
+			// Chroma plane - Next row, bytes 8..15
+			pixels1_NextRow = __builtin_msa_vshf_b(maskChroma, (v16i8) pixels1_NextRow, (v16i8) pixels1_NextRow);
 
-	int height = (int) dstHeight;
-	while (height > 0)
-	{
+			pixels1 = __builtin_msa_sldi_b((v16i8) pixels1, (v16i8) pixels1, 8);
+			pixels1_NextRow = __builtin_msa_sldi_b((v16i8) pixels1_NextRow, (v16i8) pixels1_NextRow, 8);
+			pixels0 = (v16i8) __builtin_msa_or_v((v16u8) pixels0, (v16u8) pixels1);
+			pixels0_NextRow = (v16i8) __builtin_msa_or_v((v16u8) pixels0_NextRow, (v16u8) pixels1_NextRow);
+			pixels0 = (v16i8) __builtin_msa_ave_u_b((v16u8) pixels0, (v16u8) pixels0_NextRow);
+			__builtin_msa_st_b(pixels0, pLocalDstChroma, 0);
+
+			pLocalSrc += 32;
+			pLocalSrcNextRow += 32;
+			pLocalDstLuma += 16;
+			pLocalDstLumaNextRow += 16;
+			pLocalDstChroma += 16;
+			width--;
+		}
+
+		for (int x = 0; x < postfixWidth; x += 2)
+		{
+			*pLocalDstChroma++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;			// U
+			*pLocalDstLuma++ = *pLocalSrc++;						// Y
+			*pLocalDstLumaNextRow++ = *pLocalSrcNextRow++;					// Y - next row
+			*pLocalDstChroma++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;			// V
+			*pLocalDstLuma++ = *pLocalSrc++;						// Y
+			*pLocalDstLumaNextRow++ = *pLocalSrcNextRow++;					// Y - next row
+		}
+#else // C
 		pLocalSrc = (unsigned char *) pSrcImage;
 		pLocalDstLuma = (unsigned char *) pDstLumaImage;
 		pLocalDstChroma = (unsigned char *) pDstChromaImage;
 		pLocalSrcNextRow = (unsigned char *) pSrcImage + srcImageStrideInBytes;
 		pLocalDstLumaNextRow = (unsigned char *) pDstLumaImage + dstLumaImageStrideInBytes;
 
-
-		for (int x = 0; x < (int) dstWidth; x += 2)
+		for (int x = 0; x < dstWidth; x += 2)
 		{
-			*pLocalDstLuma++ = *pLocalSrc++;						// Y
-			*pLocalDstLumaNextRow++ = *pLocalSrcNextRow++;					// Y - next row
 			*pLocalDstChroma++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;			// U
 			*pLocalDstLuma++ = *pLocalSrc++;						// Y
 			*pLocalDstLumaNextRow++ = *pLocalSrcNextRow++;					// Y - next row
 			*pLocalDstChroma++ = (*pLocalSrc++ + *pLocalSrcNextRow++) >> 1;			// V
+			*pLocalDstLuma++ = *pLocalSrc++;						// Y
+			*pLocalDstLumaNextRow++ = *pLocalSrcNextRow++;					// Y - next row
 		}
-
+#endif
 		pSrcImage += (srcImageStrideInBytes + srcImageStrideInBytes);				// Advance by 2 rows
 		pDstLumaImage += (dstLumaImageStrideInBytes + dstLumaImageStrideInBytes);		// Advance by 2 rows
 		pDstChromaImage += dstChromaImageStrideInBytes;
