@@ -1955,6 +1955,75 @@ int HafCpu_ColorDepth_U8_S16_Wrap
 	return AGO_SUCCESS;
 }
 
+int HafCpu_ColorDepth_S16_U8
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes,
+		vx_int32      shift
+	)
+{
+
+#if ENABLE_MSA
+	int prefixWidth = intptr_t(pDstImage) & 7;			// Two bytes in output = 1 pixel
+	prefixWidth = (prefixWidth == 0) ? 0 : (8 - prefixWidth);
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
+
+	v8i16 shift_v = __builtin_msa_fill_h(shift);
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+	v16i8 pixelsL, pixelsH;
+#endif
+
+	for (int height = 0; height < (int) dstHeight; height++)
+
+	{
+		vx_uint8 * pLocalSrc = pSrcImage;
+		vx_int16 * pLocalDst = pDstImage;
+#if ENABLE_MSA
+
+		for (int width = 0; width < prefixWidth; width++)
+		{
+			int pix = (int) (*pLocalSrc++);
+			*pLocalDst++ = (vx_int16) (pix << shift);
+		}
+
+		for (int width = 0; width < alignedWidth; width += 16)
+		{
+			pixelsL = __builtin_msa_ld_b((void *) pLocalSrc, 0);
+			pixelsH = __builtin_msa_ilvl_b(zeromask, pixelsL);
+			pixelsL = __builtin_msa_ilvr_b(zeromask, pixelsL);
+			pixelsH = (v16i8) __builtin_msa_sll_h((v8i16) pixelsH, shift_v);
+			pixelsL = (v16i8) __builtin_msa_sll_h((v8i16) pixelsL, shift_v);
+			__builtin_msa_st_b((v16i8) pixelsL, (void *) pLocalDst, 0);
+			__builtin_msa_st_b((v16i8) pixelsH, (void *) (pLocalDst + 8), 0);
+
+			pLocalSrc += 16;
+			pLocalDst += 16;
+		}
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			int pix = (int) (*pLocalSrc++);
+			*pLocalDst++ = (vx_int16) (pix << shift);
+		}
+#else	//C
+		for (int width = 0; width < (int) dstWidth; width++)
+		{
+			int pix = (int) (*pLocalSrc++);
+			*pLocalDst++ = (vx_int16) (pix << shift);
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += (dstImageStrideInBytes >> 1);
+	}
+
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Accumulate_S16_S16U8_Sat
 	(
 		vx_uint32     dstWidth,
