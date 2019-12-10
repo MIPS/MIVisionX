@@ -2024,6 +2024,87 @@ int HafCpu_ColorDepth_S16_U8
 	return AGO_SUCCESS;
 }
 
+int HafCpu_ColorDepth_U8_S16_Sat
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_int16    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes,
+		vx_int32      shift
+	)
+
+{
+
+#if ENABLE_MSA
+	int prefixWidth = intptr_t(pDstImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
+
+	v8i16 shift_v = __builtin_msa_fill_h(shift);
+	v16i8 pixels1, pixels2;
+	v8u16 min_255 = (v8u16) __builtin_msa_fill_h(255);
+#endif
+
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+		vx_int16 * pLocalSrc = pSrcImage;
+		vx_uint8 * pLocalDst = pDstImage;
+
+#if ENABLE_MSA
+		for (int width = 0; width < prefixWidth; width++)
+		{
+			int pix = (int) (*pLocalSrc++);
+			pix >>= shift;
+			pix = min(max(pix, 0), 255);
+			*pLocalDst++ = (vx_uint8) (pix);
+		}
+
+		for (int width = 0; width < (int) alignedWidth; width += 16)
+		{
+
+			pixels1 = __builtin_msa_ld_b((void *) pLocalSrc, 0);
+			pixels2 = __builtin_msa_ld_b((void *) (pLocalSrc + 8), 0);
+			pixels1 = (v16i8) __builtin_msa_sra_h( (v8i16) pixels1, shift_v);
+			pixels2 = (v16i8) __builtin_msa_sra_h( (v8i16) pixels2, shift_v);
+			pixels1 = (v16i8) __builtin_msa_maxi_s_h((v8i16) pixels1, 0);
+			pixels1 = (v16i8) __builtin_msa_min_u_h((v8u16) pixels1, min_255);
+			pixels2 = (v16i8) __builtin_msa_maxi_s_h((v8i16) pixels2, 0);
+			pixels2 = (v16i8) __builtin_msa_min_u_h((v8u16) pixels2, min_255);
+			pixels1 = (v16i8) __builtin_msa_pckev_b((v16i8) pixels2, (v16i8) pixels1);
+			__builtin_msa_st_b(pixels1, (void *) pLocalDst, 0);
+
+			pLocalSrc += 16;
+			pLocalDst += 16;
+
+		}
+
+		for (int width = 0; width < postfixWidth; width++)
+		{
+			int pix = *pLocalSrc++;
+			pix >>= shift;
+			pix = min(max(pix, 0), 255);
+			*pLocalDst++ = (vx_uint8) (pix);
+		}
+#else  //C
+		for (int width = 0; width < (int) dstWidth; width++)
+		{
+			int pix = *pLocalSrc++;
+			pix >>= shift;
+			pix = min(max(pix, 0), 255);
+			*pLocalDst++ = (vx_uint8) (pix);
+		}
+#endif
+
+		pSrcImage += (srcImageStrideInBytes >> 1);
+		pDstImage += dstImageStrideInBytes;
+	}
+
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Accumulate_S16_S16U8_Sat
 	(
 		vx_uint32     dstWidth,
