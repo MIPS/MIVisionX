@@ -1764,17 +1764,17 @@ int HafCpu_Threshold_U1_U8_Binary
 
 /* The following are hand optimized CPU based kernels for point-multiply functions */
 int HafCpu_Mul_U8_U8U8_Wrap_Trunc
-(
-	vx_uint32     dstWidth,
-	vx_uint32     dstHeight,
-	vx_uint8    * pDstImage,
-	vx_uint32     dstImageStrideInBytes,
-	vx_uint8    * pSrcImage1,
-	vx_uint32     srcImage1StrideInBytes,
-	vx_uint8    * pSrcImage2,
-	vx_uint32     srcImage2StrideInBytes,
-	vx_float32    scale
-)
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_uint8    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes,
+		vx_float32    scale
+	)
 {
 
 #if ENABLE_MSA
@@ -2088,7 +2088,7 @@ int HafCpu_ColorDepth_U8_S16_Sat
 			pix = min(max(pix, 0), 255);
 			*pLocalDst++ = (vx_uint8) (pix);
 		}
-#else  //C
+#else // C
 		for (int width = 0; width < (int) dstWidth; width++)
 		{
 			int pix = *pLocalSrc++;
@@ -2168,6 +2168,120 @@ int HafCpu_Accumulate_S16_S16U8_Sat
 #endif
 		pSrcImage += srcImageStrideInBytes;
 		pDstImage += (dstImageStrideInBytes >> 1);
+	}
+
+	return AGO_SUCCESS;
+}
+
+int HafCpu_AccumulateSquared_S16_S16U8_Sat
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes,
+		vx_uint32     shift
+	)
+{
+	vx_uint8 *pLocalSrc;
+	vx_int16 *pLocalDst;
+#if ENABLE_MSA
+	v16i8 *pLocalSrc_msa, *pLocalDst_msa;
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+	v16i8 resultHH, resultHL, resultLH, resultLL, pixelsHH, pixelsHL, pixelsLH, pixelsLL;
+	v4i32 shift_v = __builtin_msa_fill_w(shift);
+
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+	int height = (int) dstHeight;
+	while (height)
+	{
+#if ENABLE_MSA
+		pLocalSrc_msa = (v16i8 *) pSrcImage;
+		pLocalDst_msa = (v16i8 *) pDstImage;
+
+		// 16 pixels at a time
+		int width = alignedWidth >> 4;
+		while (width)
+		{
+			pixelsLL = __builtin_msa_ld_b(pLocalSrc_msa++, 0);
+			resultLL = __builtin_msa_ld_b(pLocalDst_msa, 0);
+			resultHL = __builtin_msa_ld_b(pLocalDst_msa + 1, 0);
+
+			// Convert input to 32 bit
+			pixelsHL = __builtin_msa_ilvl_b(zeromask, pixelsLL);
+			pixelsHH = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) pixelsHL);
+			pixelsHL = __builtin_msa_ilvr_b(zeromask, pixelsHL);
+			pixelsLL = __builtin_msa_ilvr_b(zeromask, pixelsLL);
+			pixelsLH = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) pixelsLL);
+			pixelsLL = __builtin_msa_ilvr_b(zeromask, pixelsLL);
+
+			// Convert result to 32 bit
+			v8i16 signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) resultHL, 0);
+			resultHH = (v16i8) __builtin_msa_ilvl_h(signmask, (v8i16) resultHL);
+			resultHL = (v16i8) __builtin_msa_ilvr_h(signmask, (v8i16) resultHL);
+
+			signmask = (v8i16) __builtin_msa_clti_s_h((v8i16) resultLL, 0);
+			resultLH = (v16i8) __builtin_msa_ilvl_h(signmask, (v8i16) resultLL);
+			resultLL = (v16i8) __builtin_msa_ilvr_h(signmask, (v8i16) resultLL);
+
+			// Multiply
+			pixelsHH = (v16i8) __builtin_msa_mulv_w((v4i32) pixelsHH, (v4i32) pixelsHH);
+			pixelsHL = (v16i8) __builtin_msa_mulv_w((v4i32) pixelsHL, (v4i32) pixelsHL);
+			pixelsLH = (v16i8) __builtin_msa_mulv_w((v4i32) pixelsLH, (v4i32) pixelsLH);
+			pixelsLL = (v16i8) __builtin_msa_mulv_w((v4i32) pixelsLL, (v4i32) pixelsLL);
+
+			pixelsHH = (v16i8) __builtin_msa_sra_w((v4i32) pixelsHH, shift_v);
+			pixelsHL = (v16i8) __builtin_msa_sra_w((v4i32) pixelsHL, shift_v);
+			pixelsLH = (v16i8) __builtin_msa_sra_w((v4i32) pixelsLH, shift_v);
+			pixelsLL = (v16i8) __builtin_msa_sra_w((v4i32) pixelsLL, shift_v);
+
+			resultHH = (v16i8) __builtin_msa_addv_w((v4i32) resultHH, (v4i32) pixelsHH);
+			resultHL = (v16i8) __builtin_msa_addv_w((v4i32) resultHL, (v4i32) pixelsHL);
+			resultLH = (v16i8) __builtin_msa_addv_w((v4i32) resultLH, (v4i32) pixelsLH);
+			resultLL = (v16i8) __builtin_msa_addv_w((v4i32) resultLL, (v4i32) pixelsLL);
+
+			v4i32 temp0_u = __builtin_msa_sat_s_w((v4i32) resultHL, 15);
+			v4i32 temp1_u = __builtin_msa_sat_s_w((v4i32) resultHH, 15);
+			resultHL = (v16i8) __builtin_msa_pckev_h((v8i16) temp1_u, (v8i16) temp0_u);
+
+			temp0_u = __builtin_msa_sat_s_w((v4i32) resultLL, 15);
+			temp1_u = __builtin_msa_sat_s_w((v4i32) resultLH, 15);
+			resultLL = (v16i8) __builtin_msa_pckev_h((v8i16) temp1_u, (v8i16) temp0_u);
+
+			__builtin_msa_st_b(resultLL, (void *) pLocalDst_msa++, 0);
+			__builtin_msa_st_b(resultHL, (void *) pLocalDst_msa++, 0);
+
+			width--;
+		}
+
+		pLocalSrc = (vx_uint8 *) pLocalSrc_msa;
+		pLocalDst = (vx_int16 *) pLocalDst_msa;
+
+		for (int width = 0; width < postfixWidth; width++, pLocalSrc++)
+		{
+			vx_int32 temp = ((vx_int32) *pLocalSrc * (vx_int32) *pLocalSrc) >> shift;
+			temp += (vx_int32) *pLocalDst;
+			temp = max(min(temp, (vx_int32) INT16_MAX), (vx_int32) INT16_MIN);
+			*pLocalDst++ = (vx_int16) temp;
+		}
+#else // C
+		pLocalSrc = (vx_uint8 *) pSrcImage;
+		pLocalDst = (vx_int16 *) pDstImage;
+
+		for (int width = 0; width < dstWidth; width++, pLocalSrc++)
+		{
+			vx_int32 temp = ((vx_int32) *pLocalSrc * (vx_int32) *pLocalSrc) >> shift;
+			temp += (vx_int32) *pLocalDst;
+			temp = max(min(temp, (vx_int32) INT16_MAX), (vx_int32) INT16_MIN);
+			*pLocalDst++ = (vx_int16) temp;
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += (dstImageStrideInBytes >> 1);
+		height--;
 	}
 
 	return AGO_SUCCESS;
