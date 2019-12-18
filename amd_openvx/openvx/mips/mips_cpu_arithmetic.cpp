@@ -1180,6 +1180,204 @@ int HafCpu_MinMaxLoc_DATA_U8DATA_Loc_None_Count_MinMax
 	return AGO_SUCCESS;
 }
 
+int HafCpu_MinMax_DATA_S16
+	(
+		vx_int32    * pDstMinValue,
+		vx_int32    * pDstMaxValue,
+		vx_uint32     srcWidth,
+		vx_uint32     srcHeight,
+		vx_int16    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+	int prefixWidth = intptr_t(pSrcImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+
+	// 2 bytes = 1 pixel
+	prefixWidth >>= 1;
+	int postfixWidth = ((int) srcWidth - prefixWidth) & 15;
+	int alignedWidth = (int) srcWidth - prefixWidth - postfixWidth;
+	short maxVal = SHRT_MIN, minVal = SHRT_MAX;
+	short * pLocalSrc;
+#if ENABLE_MSA
+	v8i16 * pLocalSrc_msa;
+	v8i16 pixels;
+	v8i16 maxVal_msa = __builtin_msa_fill_h(maxVal);
+	v8i16 minVal_msa = __builtin_msa_fill_h(minVal);
+#endif
+
+	int height = (int) srcHeight;
+	while (height)
+	{
+		pLocalSrc = (short *) pSrcImage;
+#if ENABLE_MSA
+		for (int x = 0; x < prefixWidth; x++, pLocalSrc++)
+		{
+			maxVal = max(maxVal, *pLocalSrc);
+			minVal = min(minVal, *pLocalSrc);
+		}
+		pLocalSrc_msa = (v8i16*) pLocalSrc;
+
+		// 8 pixels processed at a time
+		int width = (int) (alignedWidth >> 3);
+		while (width)
+		{
+			pixels = __builtin_msa_ld_h(pLocalSrc_msa++, 0);
+			maxVal_msa = __builtin_msa_max_s_h(maxVal_msa, pixels);
+			minVal_msa = __builtin_msa_min_s_h(minVal_msa, pixels);
+
+			width--;
+		}
+		pLocalSrc = (short *) pLocalSrc_msa;
+		for (int x = 0; x < postfixWidth; x++, pLocalSrc++)
+		{
+			maxVal = max(maxVal, *pLocalSrc);
+			minVal = min(minVal, *pLocalSrc);
+		}
+
+		// Compute the max value out of the max at 16 individual places
+		for (int i = 0; i < 8; i++)
+		{
+			maxVal = max(maxVal, *((short*) &maxVal_msa[i]));
+			minVal = min(minVal, *((short*) &minVal_msa[i]));
+		}
+#else
+		for (int x = 0; x < srcWidth; x++, pLocalSrc++)
+		{
+			maxVal = max(maxVal, *pLocalSrc);
+			minVal = min(minVal, *pLocalSrc);
+		}
+#endif
+
+	pSrcImage += (srcImageStrideInBytes >> 1);
+	height--;
+	}
+	*pDstMinValue = (vx_int32) minVal;
+	*pDstMaxValue = (vx_int32) maxVal;
+
+	return AGO_SUCCESS;
+}
+
+int HafCpu_MinMaxLoc_DATA_S16DATA_Loc_MinMax_Count_MinMax
+	(
+		vx_uint32          * pMinLocCount,
+		vx_uint32          * pMaxLocCount,
+		vx_uint32            capacityOfMinLocList,
+		vx_coordinates2d_t   minLocList[],
+		vx_uint32            capacityOfMaxLocList,
+		vx_coordinates2d_t   maxLocList[],
+		vx_int32           * pDstMinValue,
+		vx_int32           * pDstMaxValue,
+		vx_uint32            numDataPartitions,
+		vx_int32             srcMinValue[],
+		vx_int32             srcMaxValue[],
+		vx_uint32            srcWidth,
+		vx_uint32            srcHeight,
+		vx_int16           * pSrcImage,
+		vx_uint32            srcImageStrideInBytes
+	)
+{
+	// Compute the global minima and maxima
+	vx_int32 globalMin, globalMax;
+	HafCpu_MinMaxMerge_DATA_DATA(&globalMin, &globalMax, numDataPartitions, srcMinValue, srcMaxValue);
+
+	*pDstMinValue = globalMin;
+	*pDstMaxValue = globalMax;
+
+	int minCount = 0, maxCount = 0;
+	short * pLocalSrc;
+
+	bool minListNotFull = (minCount < (int) capacityOfMinLocList);
+	bool maxListNotFull = (maxCount < (int) capacityOfMaxLocList);
+	vx_coordinates2d_t loc;
+
+	for (int height = 0; height < (int) srcHeight; height++)
+	{
+		pLocalSrc = (short *) pSrcImage;
+		int width = 0;
+
+		while (width < (int) srcWidth)
+		{
+			if (*pLocalSrc == globalMin)
+			{
+				if (minListNotFull)
+				{
+					loc.x = width;
+					loc.y = height;
+					minLocList[minCount] = loc;
+				}
+				minCount++;
+				minListNotFull = (minCount < (int) capacityOfMinLocList);
+			}
+			if (*pLocalSrc == globalMax)
+			{
+				if (maxListNotFull)
+				{
+					loc.x = width;
+					loc.y = height;
+					maxLocList[maxCount] = loc;
+				}
+				maxCount++;
+				maxListNotFull = (maxCount < (int) capacityOfMaxLocList);
+			}
+			width++;
+			pLocalSrc++;
+		}
+		pSrcImage += (srcImageStrideInBytes >> 1);
+	}
+	*pMinLocCount = (vx_int32) minCount;
+	*pMaxLocCount = (vx_int32) maxCount;
+
+	return AGO_SUCCESS;
+}
+
+int HafCpu_MinMaxLoc_DATA_S16DATA_Loc_None_Count_MinMax
+	(
+		vx_uint32          * pMinLocCount,
+		vx_uint32          * pMaxLocCount,
+		vx_int32           * pDstMinValue,
+		vx_int32           * pDstMaxValue,
+		vx_uint32            numDataPartitions,
+		vx_int32             srcMinValue[],
+		vx_int32             srcMaxValue[],
+		vx_uint32            srcWidth,
+		vx_uint32            srcHeight,
+		vx_int16           * pSrcImage,
+		vx_uint32            srcImageStrideInBytes
+	)
+{
+	// Compute the global minima and maxima
+	vx_int32 globalMin, globalMax;
+	HafCpu_MinMaxMerge_DATA_DATA(&globalMin, &globalMax, numDataPartitions, srcMinValue, srcMaxValue);
+
+	*pDstMinValue = globalMin;
+	*pDstMaxValue = globalMax;
+
+	int minCount = 0, maxCount = 0;
+	short * pLocalSrc;
+
+	for (int height = 0; height < (int) srcHeight; height++)
+	{
+		pLocalSrc = (short *) pSrcImage;
+		int width = 0;
+
+		while (width < (int) srcWidth)
+		{
+			if (*pLocalSrc == globalMin)
+				minCount++;
+			if (*pLocalSrc == globalMax)
+				maxCount++;
+			width++;
+			pLocalSrc++;
+		}
+		pSrcImage += (srcImageStrideInBytes >> 1);
+	}
+	*pMinLocCount = (vx_int32) minCount;
+	*pMaxLocCount = (vx_int32) maxCount;
+
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Phase_U8_S16S16
 	(
 		vx_uint32     dstWidth,

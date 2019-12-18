@@ -1487,18 +1487,6 @@ int HafCpu_HistogramMerge_DATA_DATA
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_MinMax_DATA_S16
-	(
-		vx_int32    * pDstMinValue,
-		vx_int32    * pDstMaxValue,
-		vx_uint32     srcWidth,
-		vx_uint32     srcWeight,
-		vx_int16    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_MinMaxLoc_DATA_U8DATA_Loc_None_Count_Min
 	(
 		vx_uint32          * pMinLocCount,
@@ -1637,23 +1625,6 @@ int HafCpu_MinMaxLoc_DATA_S16DATA_Loc_None_Count_Max
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_MinMaxLoc_DATA_S16DATA_Loc_None_Count_MinMax
-	(
-		vx_uint32          * pMinLocCount,
-		vx_uint32          * pMaxLocCount,
-		vx_int32           * pDstMinValue,
-		vx_int32           * pDstMaxValue,
-		vx_uint32            numDataPartitions,
-		vx_int32             srcMinValue[],
-		vx_int32             srcMaxValue[],
-		vx_uint32            srcWidth,
-		vx_uint32            srcHeight,
-		vx_int16           * pSrcImage,
-		vx_uint32            srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_MinMaxLoc_DATA_S16DATA_Loc_Min_Count_Min
 	(
 		vx_uint32          * pMinLocCount,
@@ -1713,27 +1684,6 @@ int HafCpu_MinMaxLoc_DATA_S16DATA_Loc_Max_Count_MinMax
 	(
 		vx_uint32          * pMinLocCount,
 		vx_uint32          * pMaxLocCount,
-		vx_uint32            capacityOfMaxLocList,
-		vx_coordinates2d_t   maxLocList[],
-		vx_int32           * pDstMinValue,
-		vx_int32           * pDstMaxValue,
-		vx_uint32            numDataPartitions,
-		vx_int32             srcMinValue[],
-		vx_int32             srcMaxValue[],
-		vx_uint32            srcWidth,
-		vx_uint32            srcHeight,
-		vx_int16           * pSrcImage,
-		vx_uint32            srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
-int HafCpu_MinMaxLoc_DATA_S16DATA_Loc_MinMax_Count_MinMax
-	(
-		vx_uint32          * pMinLocCount,
-		vx_uint32          * pMaxLocCount,
-		vx_uint32            capacityOfMinLocList,
-		vx_coordinates2d_t   minLocList[],
 		vx_uint32            capacityOfMaxLocList,
 		vx_coordinates2d_t   maxLocList[],
 		vx_int32           * pDstMinValue,
