@@ -624,19 +624,6 @@ int HafCpu_Xnor_U1_U1U1
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_AccumulateWeighted_U8_U8U8
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint8    * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes,
-		vx_float32    alpha
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_Mul_S16_U8U8_Wrap_Trunc
 	(
 		vx_uint32     dstWidth,

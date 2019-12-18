@@ -2286,3 +2286,178 @@ int HafCpu_AccumulateSquared_S16_S16U8_Sat
 
 	return AGO_SUCCESS;
 }
+
+int HafCpu_AccumulateWeighted_U8_U8U8
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes,
+		vx_float32    alpha
+	)
+{
+	vx_uint8 *pLocalSrc, *pLocalDst;
+#if ENABLE_MSA
+	v16i8 *pLocalSrc_msa, *pLocalDst_msa;
+	v16i8 pixelsI0;
+	v4i32 pixelsI1, tempI;
+	v4f32 pixelsF0, pixelsF1, pixelsF2, pixelsF3, temp;
+	v16i8 zero = (v16i8) __builtin_msa_ldi_b(0);
+	v4f32 a = {alpha, alpha, alpha, alpha};
+	v4f32 aprime = {(float) (1.0 - alpha), (float) (1.0 - alpha), (float) (1.0 - alpha), (float) (1.0 - alpha)};
+
+	int alignedWidth = dstWidth & ~15;
+	int postfixWidth = dstWidth - alignedWidth;
+#endif
+
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		pLocalSrc_msa = (v16i8 *) pSrcImage;
+		pLocalDst_msa = (v16i8 *) pDstImage;
+
+		for (int width = 0; width < alignedWidth; width += 16)
+		{
+			// For the input pixels
+			pixelsI0 = __builtin_msa_ld_b(pLocalSrc_msa++, 0);
+
+			// Convert to int32
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_b(zero, pixelsI0);
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixelsI1);
+			// Convert to float32
+			pixelsF0 = __builtin_msa_ffint_s_w(pixelsI1);
+			pixelsI1 = (v4i32) __builtin_msa_sldi_b(pixelsI0, pixelsI0, 4);
+			pixelsI1[3] = 0;
+
+			// Convert to int32
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_b(zero, (v16i8) pixelsI1);
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixelsI1);
+			// Convert to float32
+			pixelsF1 = __builtin_msa_ffint_s_w(pixelsI1);
+			pixelsI1 = (v4i32) __builtin_msa_sldi_b(pixelsI0, pixelsI0, 8);
+			pixelsI1[2] = 0;
+			pixelsI1[3] = 0;
+
+			// Convert to int32
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_b(zero, (v16i8) pixelsI1);
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixelsI1);
+			// Convert to float32
+			pixelsF2 = __builtin_msa_ffint_s_w(pixelsI1);
+			pixelsI1 = (v4i32) __builtin_msa_sldi_b(pixelsI0, pixelsI0, 12);
+			pixelsI1[1] = 0;
+			pixelsI1[2] = 0;
+			pixelsI1[3] = 0;
+
+			// Convert to int32
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_b(zero, (v16i8) pixelsI1);
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixelsI1);
+			// Convert to float32
+			pixelsF3 = __builtin_msa_ffint_s_w(pixelsI1);
+
+			// input * alpha
+			pixelsF0 = __builtin_msa_fmul_w(pixelsF0, a);
+			pixelsF1 = __builtin_msa_fmul_w(pixelsF1, a);
+			pixelsF2 = __builtin_msa_fmul_w(pixelsF2, a);
+			pixelsF3 = __builtin_msa_fmul_w(pixelsF3, a);
+
+			// For the output pixels
+			pixelsI0 = __builtin_msa_ld_b(pLocalDst_msa, 0);
+
+			// Convert to int32
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_b(zero, pixelsI0);
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixelsI1);
+			// Convert to float32
+			temp = __builtin_msa_ffint_s_w(pixelsI1);
+			// (1 - alpha) * output
+			temp = __builtin_msa_fmul_w(temp, aprime);
+			// (1 - alpha) * output + alpha * input
+			pixelsF0 = __builtin_msa_fadd_w(pixelsF0, temp);
+
+			pixelsI1 = (v4i32) __builtin_msa_sldi_b(pixelsI0, pixelsI0, 4);
+			pixelsI1[3] = 0;
+			// Convert to int32
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_b(zero, (v16i8) pixelsI1);
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixelsI1);
+			// Convert to float32
+			temp = __builtin_msa_ffint_s_w(pixelsI1);
+			// (1 - alpha) * output
+			temp = __builtin_msa_fmul_w(temp, aprime);
+			// (1 - alpha) * output + alpha * input
+			pixelsF1 = __builtin_msa_fadd_w(pixelsF1, temp);
+
+			pixelsI1 = (v4i32) __builtin_msa_sldi_b(pixelsI0, pixelsI0, 8);
+			pixelsI1[2] = 0;
+			pixelsI1[3] = 0;
+			// Convert to int32
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_b(zero, (v16i8) pixelsI1);
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixelsI1);
+			// Convert to float32
+			temp = __builtin_msa_ffint_s_w(pixelsI1);
+			// (1 - alpha) * output
+			temp = __builtin_msa_fmul_w(temp, aprime);
+			// (1 - alpha) * output + alpha * input
+			pixelsF2 = __builtin_msa_fadd_w(pixelsF2, temp);
+
+			pixelsI1 = (v4i32) __builtin_msa_sldi_b(pixelsI0, pixelsI0, 12);
+			pixelsI1[1] = 0;
+			pixelsI1[2] = 0;
+			pixelsI1[3] = 0;
+			// Convert to int32
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_b(zero, (v16i8) pixelsI1);
+			pixelsI1 = (v4i32) __builtin_msa_ilvr_h((v8i16) zero, (v8i16) pixelsI1);
+			// Convert to float32
+			temp = __builtin_msa_ffint_s_w(pixelsI1);
+			// (1 - alpha) * output
+			temp = __builtin_msa_fmul_w(temp, aprime);
+			// (1 - alpha) * output + alpha * input
+			pixelsF3 = __builtin_msa_fadd_w(pixelsF3, temp);
+
+			pixelsI0 = (v16i8) __builtin_msa_ftrunc_s_w(pixelsF0);
+			pixelsI1 = __builtin_msa_ftrunc_s_w(pixelsF1);
+
+			// lower 8 values (word)
+			v4u32 temp0_u = (v4u32) __builtin_msa_sat_u_h((v8u16) pixelsI0, 15);
+			v4u32 temp1_u = (v4u32) __builtin_msa_sat_u_h((v8u16) pixelsI1, 15);
+			pixelsI0 = (v16i8) __builtin_msa_pckev_h((v8i16) temp1_u, (v8i16) temp0_u);
+
+			pixelsI1 = __builtin_msa_ftrunc_s_w(pixelsF2);
+			tempI = __builtin_msa_ftrunc_s_w(pixelsF3);
+
+			// upper 8 values (word)
+			temp0_u = (v4u32) __builtin_msa_sat_u_h((v8u16) pixelsI1, 15);
+			temp1_u = (v4u32) __builtin_msa_sat_u_h((v8u16) tempI, 15);
+			pixelsI1 = (v4i32) __builtin_msa_pckev_h((v8i16) temp1_u, (v8i16) temp0_u);
+
+			v8u16 temp0_u8 = (v8u16) __builtin_msa_sat_u_b((v16u8) pixelsI0, 7);
+			v8u16 temp1_u8 = (v8u16) __builtin_msa_sat_u_b((v16u8) pixelsI1, 7);
+			pixelsI0 = (v16i8) __builtin_msa_pckev_b((v16i8) temp1_u8, (v16i8) temp0_u8);
+
+			__builtin_msa_st_b(pixelsI0, (void *) pLocalDst_msa++, 0);
+		}
+
+		pLocalSrc = (vx_uint8 *) pLocalSrc_msa;
+		pLocalDst = (vx_uint8 *) pLocalDst_msa;
+
+		for (int width = 0; width < postfixWidth; width++, pLocalSrc++)
+		{
+			vx_float32 temp = ((1 - alpha) * (vx_float32) *pLocalDst) + (alpha * (vx_float32) *pLocalSrc);
+			*pLocalDst++ = (vx_uint8) temp;
+		}
+#else
+		pLocalSrc = (vx_uint8 *) pSrcImage;
+		pLocalDst = (vx_uint8 *) pDstImage;
+
+		for (int width = 0; width < dstWidth; width++, pLocalSrc++)
+		{
+			vx_float32 temp = ((1 - alpha) * (vx_float32) *pLocalDst) + (alpha * (vx_float32) *pLocalSrc);
+			*pLocalDst++ = (vx_uint8) temp;
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+	}
+
+	return AGO_SUCCESS;
+}
