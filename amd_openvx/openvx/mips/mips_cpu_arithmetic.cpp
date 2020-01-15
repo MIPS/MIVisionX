@@ -1209,6 +1209,21 @@ int HafCpu_MinMaxLoc_DATA_U8DATA_Loc_MinMax_Count_MinMax
 	*pDstMinValue = globalMin;
 	*pDstMaxValue = globalMax;
 
+	// Search for the min and the max values in the source image
+#if ENABLE_MSA
+	v16u8 minVal = (v16u8) __builtin_msa_fill_b((unsigned char) globalMin);
+	v16u8 maxVal = (v16u8) __builtin_msa_fill_b((unsigned char) globalMax);
+	v16u8 pixels;
+
+	int prefixWidth = intptr_t(pSrcImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+	int postfixWidth = ((int) srcWidth - prefixWidth) & 15;
+	int alignedWidth = (int) srcWidth - postfixWidth;
+
+	unsigned char mask[16] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80};
+	v16u8 vmask = (v16u8) __builtin_msa_ld_w(&mask, 0);
+#endif
+
 	int minCount = 0, maxCount = 0;
 	unsigned char * pLocalSrc;
 
@@ -1218,6 +1233,129 @@ int HafCpu_MinMaxLoc_DATA_U8DATA_Loc_MinMax_Count_MinMax
 
 	for (int height = 0; height < (int) srcHeight; height++)
 	{
+#if ENABLE_MSA
+		pLocalSrc = (unsigned char *) pSrcImage;
+		int width = 0;
+		while (width < prefixWidth)
+		{
+			if (*pLocalSrc == globalMin)
+			{
+				if (minListNotFull)
+				{
+					loc.x = width;
+					loc.y = height;
+					minLocList[minCount] = loc;
+				}
+				minCount++;
+				minListNotFull = (minCount < (int) capacityOfMinLocList);
+			}
+			if (*pLocalSrc == globalMax)
+			{
+				if (maxListNotFull)
+				{
+					loc.x = width;
+					loc.y = height;
+					maxLocList[maxCount] = loc;
+				}
+				maxCount++;
+				maxListNotFull = (maxCount < (int) capacityOfMaxLocList);
+			}
+			width++;
+			pLocalSrc++;
+		}
+		while (width < alignedWidth)
+		{
+			int minMask, maxMask;
+
+			pixels = (v16u8) __builtin_msa_ld_b(pLocalSrc, 0);
+			v16u8 temp = (v16u8) __builtin_msa_ceq_b((v16i8) pixels, (v16i8) minVal);
+
+			temp = __builtin_msa_and_v(temp, vmask);
+			temp = (v16u8) __builtin_msa_hadd_u_h(temp, temp);
+			temp = (v16u8) __builtin_msa_hadd_u_w((v8u16) temp,(v8u16) temp);
+			temp = (v16u8) __builtin_msa_hadd_u_d((v4u32) temp,(v4u32) temp);
+			minMask = __builtin_msa_copy_u_d((v2i64) temp, 1);
+			minMask = (vx_uint16) minMask << 8;
+			minMask = minMask | __builtin_msa_copy_u_d((v2i64) temp, 0);
+
+			temp = (v16u8) __builtin_msa_ceq_b((v16i8) pixels, (v16i8) maxVal);
+
+			temp = __builtin_msa_and_v(temp, vmask);
+			temp = (v16u8) __builtin_msa_hadd_u_h(temp, temp);
+			temp = (v16u8) __builtin_msa_hadd_u_w((v8u16) temp,(v8u16) temp);
+			temp = (v16u8) __builtin_msa_hadd_u_d((v4u32) temp,(v4u32) temp);
+			maxMask = __builtin_msa_copy_u_d((v2i64) temp, 1);
+			maxMask = (vx_uint16) maxMask << 8;
+			maxMask = maxMask | __builtin_msa_copy_u_d((v2i64) temp, 0);
+
+			if (minMask)
+			{
+				for (int i = 0; i < 16; i++)
+				{
+					if (minMask & 1)
+					{
+						if (minListNotFull)
+						{
+							loc.y = height;
+							loc.x = width + i;
+							minLocList[minCount] = loc;
+						}
+						minCount++;
+						minListNotFull = (minCount < (int) capacityOfMinLocList);
+					}
+					minMask >>= 1;
+				}
+			}
+			if (maxMask)
+			{
+				for (int i = 0; i < 16; i++)
+				{
+					if (maxMask & 1)
+					{
+						if (maxListNotFull)
+						{
+							loc.y = height;
+							loc.x = width + i;
+							maxLocList[maxCount] = loc;
+						}
+						maxCount++;
+						maxListNotFull = (maxCount < (int) capacityOfMaxLocList);
+					}
+					maxMask >>= 1;
+				}
+			}
+			width += 16;
+			pLocalSrc += 16;
+		}
+
+		while (width < (int) srcWidth)
+		{
+			if (*pLocalSrc == globalMin)
+			{
+				if (minListNotFull)
+				{
+					loc.x = width;
+					loc.y = height;
+					minLocList[minCount] = loc;
+				}
+				minCount++;
+				minListNotFull = (minCount < (int) capacityOfMinLocList);
+			}
+			if (*pLocalSrc == globalMax)
+			{
+				if (maxListNotFull)
+				{
+					loc.x = width;
+					loc.y = height;
+					maxLocList[maxCount] = loc;
+				}
+				maxCount++;
+				maxListNotFull = (maxCount < (int) capacityOfMaxLocList);
+			}
+			width++;
+			pLocalSrc++;
+		}
+#else // C
 		pLocalSrc = (unsigned char *) pSrcImage;
 		int width = 0;
 
@@ -1248,6 +1386,7 @@ int HafCpu_MinMaxLoc_DATA_U8DATA_Loc_MinMax_Count_MinMax
 			width++;
 			pLocalSrc++;
 		}
+#endif
 		pSrcImage += srcImageStrideInBytes;
 	}
 	*pMinLocCount = (vx_int32) minCount;
