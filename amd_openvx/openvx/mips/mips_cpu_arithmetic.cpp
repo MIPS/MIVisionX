@@ -3369,6 +3369,132 @@ int HafCpu_Mul_S16_U8U8_Wrap_Round
 	return AGO_SUCCESS;
 }
 
+int HafCpu_Mul_S16_S16U8_Sat_Round
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_int16    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_uint8    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes,
+		vx_float32    scale
+	)
+{
+	// do generic floating point calculation
+#if ENABLE_MSA
+	v16u8 pixels1, pixels2, pixels3, pixels4, mask, temp1, temp2;
+	v4f32 fpels1, fpels2, fpels3, fpels4;
+	v16i8 zeros = __builtin_msa_ldi_b(0);
+	v4f32 fscale = {scale, scale, scale, scale};
+	v4i32 temp_l, temp_r, diff_l, diff_r;
+#endif
+	unsigned char *pchDst = (unsigned char *) pDstImage;
+	unsigned char *pchDstlast = (unsigned char *) pDstImage + dstHeight * dstImageStrideInBytes;
+	unsigned char *pSrc1 = (unsigned char *) pSrcImage1;
+
+	while (pchDst < pchDstlast)
+	{
+#if ENABLE_MSA
+		v16u8 *src1 = (v16u8 *) pSrc1;
+		v16u8 *src2 = (v16u8 *) pSrcImage2;
+		v16u8 *dst = (v16u8 *) pchDst;
+		v16u8 *dstlast = dst + (dstWidth >> 3);
+		while (dst < dstlast)
+		{
+			// src1 (0-7)
+			pixels1 = (v16u8) __builtin_msa_ld_b(src1++, 0);
+			// src1 (8-15)
+			pixels3 = (v16u8) __builtin_msa_ld_b(src1++, 0);
+			// src2 (0-15)
+			pixels2 = (v16u8) __builtin_msa_ld_b(src2++, 0);
+
+			pixels4 = (v16u8) __builtin_msa_ilvl_b(zeros, (v16i8) pixels2);
+			pixels2 = (v16u8) __builtin_msa_ilvr_b(zeros, (v16i8) pixels2);
+
+			// multiply low for src1*src2 for (8-15)
+			temp1 = (v16u8) __builtin_msa_mulv_h((v8i16) pixels3, (v8i16) pixels4);
+			// multiply low for src1*src2 for (0-7)
+			temp2 = (v16u8) __builtin_msa_mulv_h((v8i16) pixels1, (v8i16) pixels2);
+
+			// multiply high for src1*src2 for (8-15)
+			temp_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels3);
+			temp_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels3);
+			diff_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels4);
+			diff_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels4);
+			temp_l = __builtin_msa_dotp_s_w((v8i16) temp_l, (v8i16) diff_l);
+			temp_r = __builtin_msa_dotp_s_w((v8i16) temp_r, (v8i16) diff_r);
+			pixels3 = (v16u8) __builtin_msa_pckod_h((v8i16) temp_l, (v8i16) temp_r);
+
+			// multiply high for src1*src2 for (0-7)
+			temp_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels1);
+			temp_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels1);
+			diff_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels2);
+			diff_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels2);
+			temp_l = __builtin_msa_dotp_s_w((v8i16) temp_l, (v8i16) diff_l);
+			temp_r = __builtin_msa_dotp_s_w((v8i16) temp_r, (v8i16) diff_r);
+			pixels1 = (v16u8) __builtin_msa_pckod_h((v8i16) temp_l, (v8i16) temp_r);
+
+			// unpack to 32 bit result
+			// src1*src2 (4-7)
+			pixels2 = (v16u8) __builtin_msa_ilvl_h((v8i16) pixels1, (v8i16) temp2);
+			// src1*src2 (0-3)
+			pixels1 = (v16u8) __builtin_msa_ilvr_h((v8i16) pixels1, (v8i16) temp2);
+			// src1*src2 (12-15)
+			pixels4 = (v16u8) __builtin_msa_ilvl_h((v8i16) pixels3, (v8i16) temp1);
+			// src1*src2 (8-11)
+			pixels3 = (v16u8) __builtin_msa_ilvr_h((v8i16) pixels3, (v8i16) temp1);
+
+			// convert to packed single precision float of src1*src2
+			fpels1 = __builtin_msa_ffint_s_w((v4i32) pixels1);
+			fpels2 = __builtin_msa_ffint_s_w((v4i32) pixels2);
+			fpels3 = __builtin_msa_ffint_s_w((v4i32) pixels3);
+			fpels4 = __builtin_msa_ffint_s_w((v4i32) pixels4);
+
+			// multiply with scale
+			fpels1 = __builtin_msa_fmul_w(fpels1, fscale);
+			fpels2 = __builtin_msa_fmul_w(fpels2, fscale);
+			fpels3 = __builtin_msa_fmul_w(fpels3, fscale);
+			fpels4 = __builtin_msa_fmul_w(fpels4, fscale);
+
+			// round towards nearest even
+			pixels1 = (v16u8) __builtin_msa_ftint_s_w(fpels1);
+			pixels2 = (v16u8) __builtin_msa_ftint_s_w(fpels2);
+			pixels3 = (v16u8) __builtin_msa_ftint_s_w(fpels3);
+			pixels4 = (v16u8) __builtin_msa_ftint_s_w(fpels4);
+
+			// pack to words
+			pixels1 = (v16u8) __builtin_msa_pckev_h((v8i16) pixels2, (v8i16) pixels1);
+			pixels3 = (v16u8) __builtin_msa_pckev_h((v8i16) pixels4, (v8i16) pixels3);
+
+			// copy to dest
+			__builtin_msa_st_b((v16i8) pixels1, (void *) dst++, 0);
+			__builtin_msa_st_b((v16i8) pixels3, (void *) dst++, 0);
+		}
+		pSrc1	+= srcImage1StrideInBytes;
+		pSrcImage2 += srcImage2StrideInBytes;
+		pchDst += dstImageStrideInBytes;
+#else // C
+		short *src1 = (short *) pSrcImage1;
+		unsigned char *src2 = (unsigned char *) pSrcImage2;
+		short *dst = (short *) pchDst;
+		short *dstlast = dst + dstWidth;
+
+		while (dst < dstlast)
+		{
+			*dst++ = (short) (*src1++ * (short) *src2++ * scale);
+		}
+
+		pSrcImage1 += (srcImage1StrideInBytes >> 1);
+		pSrcImage2 += srcImage2StrideInBytes;
+		pchDst += dstImageStrideInBytes;
+#endif
+	}
+
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Mul_S16_S16U8_Wrap_Trunc
 	(
 		vx_uint32     dstWidth,
