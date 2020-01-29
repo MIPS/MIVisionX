@@ -4237,6 +4237,256 @@ int HafCpu_Mul_S16_S16S16_Wrap_Trunc
 	return AGO_SUCCESS;
 }
 
+int HafCpu_Mul_S16_S16S16_Sat_Trunc
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_int16    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_int16    * pSrcImage1,
+		vx_uint32     srcImage1StrideInBytes,
+		vx_int16    * pSrcImage2,
+		vx_uint32     srcImage2StrideInBytes,
+		vx_float32    scale
+	)
+{
+	// do generic floating point calculation
+#if ENABLE_MSA
+	v16i8 pixels1, pixels2, pixels3, pixels4, temp1, temp2, pixels_tmp;
+	v2f64 fpels1, fpels2, fpels3, fpels4;
+	v16i8 zeros = __builtin_msa_ldi_b(0);
+	v16u8 mask = (v16u8) __builtin_msa_fill_w((int) 0x0000FFFF);
+	v2f64 fscale = {scale, scale};
+	v4i32 temp_32, signmask, temp0_i, temp1_i;
+#endif
+	unsigned char *pchDst = (unsigned char *) pDstImage;
+	unsigned char *pchDstlast = (unsigned char *) pDstImage + dstHeight * dstImageStrideInBytes;
+	unsigned char *pSrc1 = (unsigned char *) pSrcImage1;
+	unsigned char *pSrc2 = (unsigned char *) pSrcImage2;
+
+	while (pchDst < pchDstlast)
+	{
+#if ENABLE_MSA
+		v16u8 * src1 = (v16u8 *) pSrc1;
+		v16u8 * src2 = (v16u8 *) pSrc2;
+		v16u8 * dst = (v16u8 *) pchDst;
+		v16u8 * dstlast = dst + (dstWidth >> 3);
+		if (scale == 1.0f){
+			while (dst < dstlast)
+			{
+				// src1 (0-7)
+				pixels1 = __builtin_msa_ld_b(src1++, 0);
+				// src1 (8-15)
+				pixels3 = __builtin_msa_ld_b(src1++, 0);
+				// src2 (0-7)
+				pixels2 = __builtin_msa_ld_b(src2++, 0);
+				// src2 (8-15)
+				pixels4 = __builtin_msa_ld_b(src2++, 0);
+
+				// multiply low for src1*src2 for (8-15)
+				temp1 = (v16i8) __builtin_msa_mulv_h((v8i16) pixels3, (v8i16) pixels4);
+				// multiply low for src1*src2 for (0-7)
+				temp2 = (v16i8) __builtin_msa_mulv_h((v8i16) pixels1, (v8i16) pixels2);
+
+				// multiply high for src1*src2 for (8-15)
+				v4i32 temp_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels3);
+				v4i32 temp_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels3);
+				v4i32 diff_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels4);
+				v4i32 diff_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels4);
+				temp_l = __builtin_msa_dotp_s_w((v8i16) temp_l, (v8i16) diff_l);
+				temp_r = __builtin_msa_dotp_s_w((v8i16) temp_r, (v8i16) diff_r);
+				pixels3 = (v16i8) __builtin_msa_pckod_h((v8i16) temp_l, (v8i16) temp_r);
+
+				// multiply high for src1*src2 for (0-7)
+				temp_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels1);
+				temp_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels1);
+				diff_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels2);
+				diff_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels2);
+				temp_l = __builtin_msa_dotp_s_w((v8i16) temp_l, (v8i16) diff_l);
+				temp_r = __builtin_msa_dotp_s_w((v8i16) temp_r, (v8i16) diff_r);
+				pixels1 = (v16i8) __builtin_msa_pckod_h((v8i16) temp_l, (v8i16) temp_r);
+
+				// unpack to 32 bit result
+				// src1*src2 (4-7)
+				pixels2 = (v16i8) __builtin_msa_ilvl_h((v8i16) pixels1, (v8i16) temp2);
+				// src1*src2 (0-3)
+				pixels1 = (v16i8) __builtin_msa_ilvr_h((v8i16) pixels1, (v8i16) temp2);
+				// src1*src2 (12-15)
+				pixels4 = (v16i8) __builtin_msa_ilvl_h((v8i16) pixels3, (v8i16) temp1);
+				// src1*src2 (8-11)
+				pixels3 = (v16i8) __builtin_msa_ilvr_h((v8i16) pixels3, (v8i16) temp1);
+
+				// pack to words with saturation
+				temp0_i = (v4i32)__builtin_msa_sat_s_w((v4i32) pixels1, 15);
+				temp1_i = (v4i32)__builtin_msa_sat_s_w((v4i32) pixels2, 15);
+				pixels1 = (v16i8) __builtin_msa_pckev_h((v8i16) temp1_i, (v8i16) temp0_i);
+
+				temp0_i = (v4i32)__builtin_msa_sat_s_w((v4i32) pixels3, 15);
+				temp1_i = (v4i32)__builtin_msa_sat_s_w((v4i32) pixels4, 15);
+				pixels3 = (v16i8) __builtin_msa_pckev_h((v8i16) temp1_i, (v8i16) temp0_i);
+
+				// copy to dest
+				__builtin_msa_st_b(pixels1, (void *) dst++, 0);
+				__builtin_msa_st_b(pixels3, (void *) dst++, 0);
+			}
+		}
+		else
+		{
+			while (dst < dstlast)
+			{
+				v2f64 fpels5, fpels6, fpels7, fpels8;
+				// src1 (0-7)
+				pixels1 = __builtin_msa_ld_b(src1++, 0);
+				// src1 (8-15)
+				pixels3 = __builtin_msa_ld_b(src1++, 0);
+				// src2 (0-7)
+				pixels2 = __builtin_msa_ld_b(src2++, 0);
+				// src2 (8-15)
+				pixels4 = __builtin_msa_ld_b(src2++, 0);
+
+				// multiply low for src1*src2 for (8-15)
+				temp1 = (v16i8) __builtin_msa_mulv_h((v8i16) pixels3, (v8i16) pixels4);
+				// multiply low for src1*src2 for (0-7)
+				temp2 = (v16i8) __builtin_msa_mulv_h((v8i16) pixels1, (v8i16) pixels2);
+
+				// multiply high for src1*src2 for (8-15)
+				v4i32 temp_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels3);
+				v4i32 temp_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels3);
+				v4i32 diff_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels4);
+				v4i32 diff_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels4);
+				temp_l = __builtin_msa_dotp_s_w((v8i16) temp_l, (v8i16) diff_l);
+				temp_r = __builtin_msa_dotp_s_w((v8i16) temp_r, (v8i16) diff_r);
+				pixels3 = (v16i8) __builtin_msa_pckod_h((v8i16) temp_l, (v8i16) temp_r);
+
+				// multiply high for src1*src2 for (0-7)
+				temp_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels1);
+				temp_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels1);
+				diff_l = (v4i32) __builtin_msa_ilvl_h((v8i16) zeros, (v8i16) pixels2);
+				diff_r = (v4i32) __builtin_msa_ilvr_h((v8i16) zeros, (v8i16) pixels2);
+				temp_l = __builtin_msa_dotp_s_w((v8i16) temp_l, (v8i16) diff_l);
+				temp_r = __builtin_msa_dotp_s_w((v8i16) temp_r, (v8i16) diff_r);
+				pixels1 = (v16i8) __builtin_msa_pckod_h((v8i16) temp_l, (v8i16) temp_r);
+
+				// unpack to 32 bit result
+				// src1*src2 (4-7)
+				pixels2 = (v16i8) __builtin_msa_ilvl_h((v8i16) pixels1, (v8i16) temp2);
+				// src1*src2 (0-3)
+				pixels1 = (v16i8) __builtin_msa_ilvr_h((v8i16) pixels1, (v8i16) temp2);
+				// src1*src2 (12-15)
+				pixels4 = (v16i8) __builtin_msa_ilvl_h((v8i16) pixels3, (v8i16) temp1);
+				// src1*src2 (8-11)
+				pixels3 = (v16i8) __builtin_msa_ilvr_h((v8i16) pixels3, (v8i16) temp1);
+
+				// convert to packed double precision float of src1*src2
+				signmask = __builtin_msa_clti_s_w((v4i32) pixels1, 0);
+				temp_32 = __builtin_msa_ilvr_w(signmask, (v4i32) pixels1);
+				fpels1 = __builtin_msa_ffint_s_d((v2i64) temp_32);
+
+				signmask = __builtin_msa_clti_s_w((v4i32) pixels2, 0);
+				temp_32 = __builtin_msa_ilvr_w(signmask, (v4i32) pixels2);
+				fpels2 = __builtin_msa_ffint_s_d((v2i64) temp_32);
+
+				signmask = __builtin_msa_clti_s_w((v4i32) pixels3, 0);
+				temp_32 = __builtin_msa_ilvr_w(signmask, (v4i32) pixels3);
+				fpels3 = __builtin_msa_ffint_s_d((v2i64) temp_32);
+
+				signmask = __builtin_msa_clti_s_w((v4i32) pixels4, 0);
+				temp_32 = __builtin_msa_ilvr_w(signmask, (v4i32) pixels4);
+				fpels4 = __builtin_msa_ffint_s_d((v2i64) temp_32);
+
+				signmask = __builtin_msa_clti_s_w((v4i32) pixels1, 0);
+				temp_32 = __builtin_msa_ilvl_w(signmask, (v4i32) pixels1);
+				fpels5 = __builtin_msa_ffint_s_d((v2i64) temp_32);
+
+				signmask = __builtin_msa_clti_s_w((v4i32) pixels2, 0);
+				temp_32 = __builtin_msa_ilvl_w(signmask, (v4i32) pixels2);
+				fpels6 = __builtin_msa_ffint_s_d((v2i64) temp_32);
+
+				signmask = __builtin_msa_clti_s_w((v4i32) pixels3, 0);
+				temp_32 = __builtin_msa_ilvl_w(signmask, (v4i32) pixels3);
+				fpels7 = __builtin_msa_ffint_s_d((v2i64) temp_32);
+
+				signmask = __builtin_msa_clti_s_w((v4i32) pixels4, 0);
+				temp_32 = __builtin_msa_ilvl_w(signmask, (v4i32) pixels4);
+				fpels8 = __builtin_msa_ffint_s_d((v2i64) temp_32);
+
+				// multiply with scale
+				fpels1 = __builtin_msa_fmul_d(fpels1, fscale);
+				fpels2 = __builtin_msa_fmul_d(fpels2, fscale);
+				fpels3 = __builtin_msa_fmul_d(fpels3, fscale);
+				fpels4 = __builtin_msa_fmul_d(fpels4, fscale);
+				fpels5 = __builtin_msa_fmul_d(fpels5, fscale);
+				fpels6 = __builtin_msa_fmul_d(fpels6, fscale);
+				fpels7 = __builtin_msa_fmul_d(fpels7, fscale);
+				fpels8 = __builtin_msa_fmul_d(fpels8, fscale);
+
+				// round towards zero
+				pixels1 = (v16i8) __builtin_msa_ftrunc_s_d(fpels1);
+				pixels1 = (v16i8) __builtin_msa_pckev_w((v4i32) zeros, (v4i32) pixels1);
+
+				pixels2 = (v16i8) __builtin_msa_ftrunc_s_d(fpels2);
+				pixels2 = (v16i8) __builtin_msa_pckev_w((v4i32) zeros, (v4i32) pixels2);
+
+				pixels3 = (v16i8) __builtin_msa_ftrunc_s_d(fpels3);
+				pixels3 = (v16i8) __builtin_msa_pckev_w((v4i32) zeros, (v4i32) pixels3);
+
+				pixels4 = (v16i8) __builtin_msa_ftrunc_s_d(fpels4);
+				pixels4 = (v16i8) __builtin_msa_pckev_w((v4i32) zeros, (v4i32) pixels4);
+
+				pixels_tmp = (v16i8) __builtin_msa_ftrunc_s_d(fpels5);
+				pixels_tmp = (v16i8) __builtin_msa_pckev_w((v4i32) zeros, (v4i32) pixels_tmp);
+				pixels1 = (v16i8) __builtin_msa_pckev_d((v2i64) pixels_tmp, (v2i64) pixels1);
+
+				pixels_tmp = (v16i8) __builtin_msa_ftrunc_s_d(fpels6);
+				pixels_tmp = (v16i8) __builtin_msa_pckev_w((v4i32) zeros, (v4i32) pixels_tmp);
+				pixels2 = (v16i8) __builtin_msa_pckev_d((v2i64) pixels_tmp, (v2i64) pixels2);
+
+				pixels_tmp = (v16i8) __builtin_msa_ftrunc_s_d(fpels7);
+				pixels_tmp = (v16i8) __builtin_msa_pckev_w((v4i32) zeros, (v4i32) pixels_tmp);
+				pixels3 = (v16i8) __builtin_msa_pckev_d((v2i64) pixels_tmp, (v2i64) pixels3);
+
+				pixels_tmp = (v16i8) __builtin_msa_ftrunc_s_d(fpels8);
+				pixels_tmp = (v16i8) __builtin_msa_pckev_w((v4i32) zeros, (v4i32) pixels_tmp);
+				pixels4 = (v16i8) __builtin_msa_pckev_d((v2i64) pixels_tmp, (v2i64) pixels4);
+
+				// pack signed saturation
+				temp0_i = (v4i32)__builtin_msa_sat_s_w((v4i32) pixels1, 15);
+				temp1_i = (v4i32)__builtin_msa_sat_s_w((v4i32) pixels2, 15);
+				pixels1 = (v16i8) __builtin_msa_pckev_h((v8i16) temp1_i, (v8i16) temp0_i);
+
+				temp0_i = (v4i32)__builtin_msa_sat_s_w((v4i32) pixels3, 15);
+				temp1_i = (v4i32)__builtin_msa_sat_s_w((v4i32) pixels4, 15);
+				pixels3 = (v16i8) __builtin_msa_pckev_h((v8i16) temp1_i, (v8i16) temp0_i);
+
+				// copy to dest
+				__builtin_msa_st_b((v16i8) pixels1, (void *) dst++, 0);
+				__builtin_msa_st_b((v16i8) pixels3, (void *) dst++, 0);
+			}
+		}
+		pSrc1 += srcImage1StrideInBytes;
+		pSrc2 += srcImage2StrideInBytes;
+		pchDst += dstImageStrideInBytes;
+#else // C
+		short *src1 = (short *) pSrcImage1;
+		short *src2 = (short *) pSrcImage2;
+		short *dst = (short *) pchDst;
+		short *dstlast = dst + dstWidth;
+		vx_int32 temp;
+
+		while (dst < dstlast)
+		{
+			temp = ((vx_float64) (*(vx_int16 *) src1++ * *(vx_int16 *) src2++) * scale);
+			*dst++ = max(min(temp, INT16_MAX), INT16_MIN);
+		}
+		pSrcImage1 += (srcImage1StrideInBytes >> 1);
+		pSrcImage2 += (srcImage2StrideInBytes >> 1);
+		pchDst += dstImageStrideInBytes;
+#endif
+	}
+
+	return AGO_SUCCESS;
+}
+
 int HafCpu_Mul_S16_S16S16_Wrap_Round
 	(
 		vx_uint32     dstWidth,
