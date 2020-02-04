@@ -1247,18 +1247,6 @@ int HafCpu_CannyEdgeTrace_U8_U8
 	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
 }
 
-int HafCpu_IntegralImage_U32_U8
-	(
-		vx_uint32     dstWidth,
-		vx_uint32     dstHeight,
-		vx_uint32   * pDstImage,
-		vx_uint32     dstImageStrideInBytes,
-		vx_uint8    * pSrcImage,
-		vx_uint32     srcImageStrideInBytes
-	){
-	return AGO_ERROR_HAFCPU_NOT_IMPLEMENTED;
-}
-
 int HafCpu_Equalize_DATA_DATA
 	(
 		vx_uint8    * pLut,

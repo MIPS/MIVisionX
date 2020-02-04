@@ -5474,3 +5474,262 @@ int HafCpu_AccumulateWeighted_U8_U8U8
 
 	return AGO_SUCCESS;
 }
+
+// For this function C algorithm is much faster then MSA implementation on mips64r6 platform while
+// MSA is slightly faster on mips32r5 platform.
+// Since main target of this port is mips64r6, this function will by default use C implementation.
+#define USE_MSA 0
+int HafCpu_IntegralImage_U32_U8
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint32   * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes
+	)
+{
+#if USE_MSA
+	v16i8 pixels1, pixels2, pixels3, pixels4;
+	v16i8 zeromask = __builtin_msa_ldi_b(0);
+
+	DECL_ALIGN(16) unsigned char shuffleMasks[16 * 26] ATTR_ALIGN(16) = {
+		14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15,
+		12, 13, 14, 15, 12, 13, 14, 15, 12, 13, 14, 15, 12, 13, 14, 15,
+	};
+	v16i8 *tbl = (v16i8 *) shuffleMasks;
+	v16i8 mask0 = __builtin_msa_ld_b(tbl + 0, 0);
+	v16i8 mask1 = __builtin_msa_ld_b(tbl + 1, 0);
+
+	short zeros = 0x0000;
+	short ones = 0xffff;
+	v8i16 shiftingReset_1_0 = (v8i16) {zeros, ones, ones, ones, ones, ones, ones, ones};
+	v8i16 shiftingReset_2_0 = (v8i16) {zeros, zeros, ones, ones, ones, ones, ones, ones};
+	v8i16 shiftingReset_2_1 = (v8i16) {ones, ones, zeros, zeros, zeros, zeros, zeros, zeros};
+#endif
+
+#if USE_MSA
+	// process 16 at a time (shift and add for cur and previous)
+	unsigned char *pSrcImage1 = pSrcImage;
+	unsigned char *pchDst = (unsigned char *) pDstImage;
+	unsigned char *pchDstlast = (unsigned char *) pDstImage + dstHeight * dstImageStrideInBytes;
+
+	while (pchDst < pchDstlast)
+	{
+		v16i8 *src = (v16i8 *) pSrcImage1;
+		v16i8 *dst = (v16i8 *) pchDst;
+		v16i8 *dstlast = dst + (dstWidth >> 2);
+		v16i8 prevsum = __builtin_msa_ldi_b(0);
+		if (pSrcImage1 == pSrcImage)
+		{
+			while (dst < dstlast)
+			{
+				// src (0-15)
+				pixels1 = __builtin_msa_ld_b(src++, 0);
+				pixels2 = __builtin_msa_ilvl_b(zeromask, pixels1);
+				pixels1 = __builtin_msa_ilvr_b(zeromask, pixels1);
+
+				// shift and add
+				pixels3 = pixels1;
+				pixels4 = pixels2;
+				for (int i = 0; i < 7; i++)
+				{
+					pixels3 = __builtin_msa_sldi_b(pixels3, pixels3, 14);
+					pixels3 = (v16i8) __builtin_msa_and_v((v16u8) pixels3, (v16u8) shiftingReset_1_0);
+					pixels4 = __builtin_msa_sldi_b(pixels4, pixels4, 14);
+					pixels4 = (v16i8) __builtin_msa_and_v((v16u8) pixels4, (v16u8) shiftingReset_1_0);
+					pixels1 = (v16i8) __builtin_msa_addv_h((v8i16) pixels1, (v8i16) pixels3);
+					pixels2 = (v16i8) __builtin_msa_addv_h((v8i16) pixels2, (v8i16) pixels4);
+				}
+				// for the second 8 sum, add to the first 8
+				pixels3 = __builtin_msa_vshf_b(mask0, pixels1, pixels1);
+				pixels2 = (v16i8) __builtin_msa_addv_h((v8i16) pixels2, (v8i16) pixels3);
+
+				// unpack to dwords and add with prevsum
+				pixels3 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) pixels1);
+				pixels4 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) pixels2);
+				pixels1 = (v16i8) __builtin_msa_ilvr_h((v8i16) zeromask, (v8i16) pixels1);
+				pixels2 = (v16i8) __builtin_msa_ilvr_h((v8i16) zeromask, (v8i16) pixels2);
+
+				pixels1 = (v16i8) __builtin_msa_addv_w((v4i32) pixels1, (v4i32) prevsum);
+				pixels2 = (v16i8) __builtin_msa_addv_w((v4i32) pixels2, (v4i32) prevsum);
+				pixels3 = (v16i8) __builtin_msa_addv_w((v4i32) pixels3, (v4i32) prevsum);
+				pixels4 = (v16i8) __builtin_msa_addv_w((v4i32) pixels4, (v4i32) prevsum);
+
+				// copy to dst (sum in words)
+				__builtin_msa_st_b((v16i8) pixels1, (void *) dst++, 0);
+				__builtin_msa_st_b((v16i8) pixels3, (void *) dst++, 0);
+				__builtin_msa_st_b((v16i8) pixels2, (void *) dst++, 0);
+				__builtin_msa_st_b((v16i8) pixels4, (void *) dst++, 0);
+
+				prevsum = __builtin_msa_vshf_b(mask1, pixels4, pixels4);
+			}
+		}
+		else
+		{
+			unsigned int prev_dword = 0;
+
+			v16i8 prevdword = __builtin_msa_ldi_b(0);
+			v16i8 prevsum1 = __builtin_msa_ldi_b(0);
+			v16i8 *prevdst = (v16i8 *) (pchDst - dstImageStrideInBytes);
+
+			while (dst < dstlast)
+			{
+				v16i8 prev1, prev2, prev3, prev4, temp, temp1, temp2, temp3;
+				pixels1 = __builtin_msa_ld_b(src++, 0);
+				pixels2 = __builtin_msa_ilvl_b(zeromask, pixels1);
+				pixels1 = __builtin_msa_ilvr_b(zeromask, pixels1);
+
+				pixels3 = pixels1;
+				pixels4 = pixels2;
+				for (int i = 0; i < 7; i++)
+				{
+					pixels3 = __builtin_msa_sldi_b(pixels3, pixels3, 14);
+					pixels3 = (v16i8) __builtin_msa_and_v((v16u8) pixels3, (v16u8) shiftingReset_1_0);
+					pixels4 = __builtin_msa_sldi_b(pixels4, pixels4, 14);
+					pixels4 = (v16i8) __builtin_msa_and_v((v16u8) pixels4, (v16u8) shiftingReset_1_0);
+					pixels1 = (v16i8) __builtin_msa_addv_h((v8i16) pixels1, (v8i16) pixels3);
+					pixels2 = (v16i8) __builtin_msa_addv_h((v8i16) pixels2, (v8i16) pixels4);
+				}
+				// for the second 8 sum, add to the first 8
+				pixels3 = __builtin_msa_vshf_b(mask0, pixels1, pixels1);
+				pixels2 = (v16i8) __builtin_msa_addv_h((v8i16) pixels2, (v8i16) pixels3);
+
+				// unpack to dwords and add with prevsum
+				pixels3 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) pixels1);
+				pixels4 = (v16i8) __builtin_msa_ilvl_h((v8i16) zeromask, (v8i16) pixels2);
+				pixels1 = (v16i8) __builtin_msa_ilvr_h((v8i16) zeromask, (v8i16) pixels1);
+				pixels2 = (v16i8) __builtin_msa_ilvr_h((v8i16) zeromask, (v8i16) pixels2);
+
+				// calculate with prevsum(x) - prevsum(x-1)
+				prev1 = __builtin_msa_ld_b(prevdst++, 0);
+
+				// subtract sum(x-1, y-1)
+				temp = __builtin_msa_sldi_b(prev1, prev1, 12);
+				temp1 = temp;
+				temp = (v16i8) __builtin_msa_and_v((v16u8) temp, (v16u8) shiftingReset_2_1);
+				temp1 = (v16i8) __builtin_msa_and_v((v16u8) temp1, (v16u8) shiftingReset_2_0);
+
+				prev2 = __builtin_msa_ld_b(prevdst++, 0);
+				temp1 = (v16i8) __builtin_msa_or_v((v16u8) temp1, (v16u8) prevdword);
+				prev1 = (v16i8) __builtin_msa_subv_w((v4i32) prev1, (v4i32) temp1);
+
+				prevdword = __builtin_msa_sldi_b(prev2, prev2, 12);
+				temp1 = prevdword;
+				prevdword = (v16i8) __builtin_msa_and_v((v16u8) prevdword, (v16u8) shiftingReset_2_1);
+
+				temp1 = (v16i8) __builtin_msa_and_v((v16u8) temp1, (v16u8) shiftingReset_2_0);
+
+				prev3 = __builtin_msa_ld_b(prevdst++, 0);
+				temp1 = (v16i8) __builtin_msa_or_v((v16u8) temp1, (v16u8) temp);
+				prev2 = (v16i8) __builtin_msa_subv_w((v4i32) prev2, (v4i32) temp1);
+
+				temp = __builtin_msa_sldi_b(prev3, prev3, 12);
+				temp1 = temp;
+				temp = (v16i8) __builtin_msa_and_v((v16u8) temp, (v16u8) shiftingReset_2_1);
+
+				temp1 = (v16i8) __builtin_msa_and_v((v16u8) temp1, (v16u8) shiftingReset_2_0);
+
+				prev4 = __builtin_msa_ld_b(prevdst++, 0);
+				temp1 = (v16i8) __builtin_msa_or_v((v16u8) temp1, (v16u8) prevdword);
+				prev3 = (v16i8) __builtin_msa_subv_w((v4i32) prev3, (v4i32) temp1);
+
+				prevdword = __builtin_msa_sldi_b(prev4, prev4, 12);
+				temp1 = prevdword;
+				prevdword = (v16i8) __builtin_msa_and_v((v16u8) prevdword, (v16u8) shiftingReset_2_1);
+
+				temp1 = (v16i8) __builtin_msa_and_v((v16u8) temp1, (v16u8) shiftingReset_2_0);
+
+				temp1 = (v16i8) __builtin_msa_or_v((v16u8) temp1, (v16u8) temp);
+				prev4 = (v16i8) __builtin_msa_subv_w((v4i32) prev4, (v4i32) temp1);
+				temp = prev1;
+				temp1 = prev2;
+				temp2 = prev3;
+				temp3 = prev4;
+
+				for (int i = 0; i < 3; i++)
+				{
+					temp = __builtin_msa_sldi_b(temp, temp, 12);
+					temp = (v16i8) __builtin_msa_and_v((v16u8) temp, (v16u8) shiftingReset_2_0);
+
+					temp1 = __builtin_msa_sldi_b(temp1, temp1, 12);
+					temp1 = (v16i8) __builtin_msa_and_v((v16u8) temp1, (v16u8) shiftingReset_2_0);
+
+					temp2 = __builtin_msa_sldi_b(temp2, temp2, 12);
+					temp2 = (v16i8) __builtin_msa_and_v((v16u8) temp2, (v16u8) shiftingReset_2_0);
+
+					temp3 = __builtin_msa_sldi_b(temp3, temp3, 12);
+					temp3 = (v16i8) __builtin_msa_and_v((v16u8) temp3, (v16u8) shiftingReset_2_0);
+
+					prev1 = (v16i8) __builtin_msa_addv_w((v4i32) prev1, (v4i32) temp);
+					prev2 = (v16i8) __builtin_msa_addv_w((v4i32) prev2, (v4i32) temp1);
+					prev3 = (v16i8) __builtin_msa_addv_w((v4i32) prev3, (v4i32) temp2);
+					prev4 = (v16i8) __builtin_msa_addv_w((v4i32) prev4, (v4i32) temp3);
+				}
+				// for the second 4 sum, add to the first 4
+				temp = __builtin_msa_vshf_b(mask1, prev1, prev1);
+				prev2 = (v16i8) __builtin_msa_addv_w((v4i32) prev2, (v4i32) temp);
+				temp1 = __builtin_msa_vshf_b(mask1, prev2, prev2);
+				prev3 = (v16i8) __builtin_msa_addv_w((v4i32) prev3, (v4i32) temp1);
+				temp = __builtin_msa_vshf_b(mask1, prev3, prev3);
+				prev4 = (v16i8) __builtin_msa_addv_w((v4i32) prev4, (v4i32) temp);
+
+				// add to pixels1 to pixels4
+				pixels1 = (v16i8) __builtin_msa_addv_w((v4i32) pixels1, (v4i32) prev1);
+				pixels3 = (v16i8) __builtin_msa_addv_w((v4i32) pixels3, (v4i32) prev2);
+				pixels2 = (v16i8) __builtin_msa_addv_w((v4i32) pixels2, (v4i32) prev3);
+				pixels4 = (v16i8) __builtin_msa_addv_w((v4i32) pixels4, (v4i32) prev4);
+				prevsum1 = __builtin_msa_vshf_b(mask1, prev4, prev4);
+
+				pixels1 = (v16i8) __builtin_msa_addv_w((v4i32) pixels1, (v4i32) prevsum);
+				pixels3 = (v16i8) __builtin_msa_addv_w((v4i32) pixels3, (v4i32) prevsum);
+				pixels2 = (v16i8) __builtin_msa_addv_w((v4i32) pixels2, (v4i32) prevsum);
+				pixels4 = (v16i8) __builtin_msa_addv_w((v4i32) pixels4, (v4i32) prevsum);
+
+				// copy to dst (sum in words)
+				__builtin_msa_st_b((v16i8) pixels1, (void *) dst++, 0);
+				__builtin_msa_st_b((v16i8) pixels3, (void *) dst++, 0);
+				__builtin_msa_st_b((v16i8) pixels2, (void *) dst++, 0);
+				__builtin_msa_st_b((v16i8) pixels4, (void *) dst++, 0);
+
+				prevsum = __builtin_msa_vshf_b(mask1, pixels4, pixels4);
+			}
+		}
+		pSrcImage1 += srcImageStrideInBytes;
+		pchDst += dstImageStrideInBytes;
+	}
+#else // C
+		unsigned char *pSrcImage1 = pSrcImage;
+		unsigned char *pchDst = (unsigned char *) pDstImage;
+		vx_uint32 y, x;
+
+		for (y = 0; y < dstHeight; y++)
+		{
+			vx_uint8 *src = pSrcImage1;
+			vx_uint32 *dst = (vx_uint32 *) pchDst;
+
+			if (y == 0)
+			{
+				dst[0] = src[0];
+				for (x = 1; x < dstWidth; x++)
+				{
+					dst[x] = dst[x-1] + src[x];
+				}
+			}
+			else
+			{
+				vx_uint32 *prevdst = (vx_uint32 *) (pchDst - dstImageStrideInBytes);
+				dst[0] = prevdst[0] + src[0];
+				for (x = 1; x < dstWidth; x++)
+				{
+					dst[x] = src[x] + dst[x-1] + prevdst[x] - prevdst[x-1];
+				}
+			}
+			pSrcImage1 += srcImageStrideInBytes;
+			pchDst += dstImageStrideInBytes;
+		}
+#endif
+
+	return AGO_SUCCESS;
+}
+#undef USE_MSA
