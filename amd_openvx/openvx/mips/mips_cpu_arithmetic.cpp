@@ -5982,3 +5982,185 @@ int HafCpu_IntegralImage_U32_U8
 	return AGO_SUCCESS;
 }
 #undef USE_MSA
+
+// Primitive: Histogram equalization
+// first do a merge of individual histograms before doing equalization
+int HafCpu_Equalize_DATA_DATA
+	(
+		vx_uint8    * pLut,
+		vx_uint32     numPartitions,
+		vx_uint32   * pPartSrcHist[]
+	)
+{
+	unsigned int cdfmin = 0, div;
+#if ENABLE_MSA
+	v4i32 pixels1, pixels2, pixels4;
+	v4i32 dst_[NUM_BINS / 4], * dst = dst_;
+	unsigned int *cdf = (unsigned int *) &dst_[0];
+	pixels4 = __builtin_msa_ldi_w(0);
+	int one = 0xffffffff;
+	int zero = 0x00000000;
+	v4i32 siftingReset = (v4i32) {zero, one, one, one};
+#else // C
+	unsigned int dst_[NUM_BINS], *dst = dst_;
+	unsigned int *cdf = (unsigned int *) &dst_;
+#endif
+
+#if ENABLE_MSA
+	for (unsigned int n = 0; n < NUM_BINS; n += 8)
+	{
+		v4i32 sum1 = __builtin_msa_ldi_w(0);
+		v4i32 sum2 = __builtin_msa_ldi_w(0);
+		for (unsigned int i = 0; i < numPartitions; i++)
+		{
+			v4i32 *phist = (v4i32 *) &pPartSrcHist[i][n];
+			pixels1 = __builtin_msa_ld_w((void *) phist, 0);
+			pixels2 = __builtin_msa_ld_w((void *) (phist + 1), 0);
+			sum1 = __builtin_msa_addv_w(sum1, pixels1);
+			sum2 = __builtin_msa_addv_w(sum2, pixels2);
+		}
+
+		// calculate cdf
+		// shift and add
+		pixels1 = sum1;
+		pixels2 = sum2;
+		for (int i = 0; i < 3; i++)
+		{
+			pixels1 = (v4i32) __builtin_msa_sldi_b((v16i8) pixels1, (v16i8) pixels1, 12);
+			pixels1 = (v4i32) __builtin_msa_and_v((v16u8) pixels1, (v16u8) siftingReset);
+			pixels2 = (v4i32) __builtin_msa_sldi_b((v16i8) pixels2, (v16i8) pixels2, 12);
+			pixels2 = (v4i32) __builtin_msa_and_v((v16u8) pixels2, (v16u8) siftingReset);
+			sum1 = __builtin_msa_addv_w(sum1, pixels1);
+			sum2 = __builtin_msa_addv_w(sum2, pixels2);
+		}
+
+		// for the second sum onwards, add to the first
+		pixels1 = __builtin_msa_shf_w(sum1, 0xff);
+		sum1 = __builtin_msa_addv_w(sum1, pixels4);
+		sum2 = __builtin_msa_addv_w(sum2, pixels4);
+		sum2 = __builtin_msa_addv_w(sum2, pixels1);
+		pixels4 = __builtin_msa_shf_w(sum2, 0xff);
+
+		// store cdf
+		__builtin_msa_st_w(sum1, (void *) dst++, 0);
+		__builtin_msa_st_w(sum2, (void *) dst++, 0);
+	}
+#else // C
+	vx_uint32 sum = 0;
+	int *phist;
+
+	for (int n = 0, p = 0; n < NUM_BINS; n++)
+	{
+		for (unsigned int i = 0; i < numPartitions; i++)
+		{
+			phist = (int *) &pPartSrcHist[i][n];
+			sum += *phist;
+			cdf[n] = sum;
+		}
+	}
+#endif
+	// find the cdf[minv]
+	for (int n = 0; n < NUM_BINS; n++)
+	{
+		pLut[n] = 0;
+		if (cdf[n] || cdfmin)
+		{
+			if (!cdfmin)
+			{
+				cdfmin = cdf[n];
+				// range
+				div = cdf[NUM_BINS - 1] - cdfmin;
+			}
+			// equalize to 0-255
+			if (div)
+			{
+				float p = (float) (cdf[n] - cdfmin) / (float) div;
+				pLut[n] = (vx_uint8) (p * 255.0f + 0.5f);
+			}
+			else
+			{
+				pLut[n] = n;
+			}
+		}
+	}
+
+	return AGO_SUCCESS;
+}
+
+int HafCpu_Lut_U8_U8
+	(
+		vx_uint32     dstWidth,
+		vx_uint32     dstHeight,
+		vx_uint8    * pDstImage,
+		vx_uint32     dstImageStrideInBytes,
+		vx_uint8    * pSrcImage,
+		vx_uint32     srcImageStrideInBytes,
+		vx_uint8    * pLut
+	)
+{
+#if ENABLE_MSA
+	v4i32 pixels1, pixels2;
+
+	int prefixWidth = intptr_t(pDstImage) & 15;
+	prefixWidth = (prefixWidth == 0) ? 0 : (16 - prefixWidth);
+
+	// Check for multiple of 16
+	int postfixWidth = ((int) dstWidth - prefixWidth) & 15;
+	int alignedWidth = (int) dstWidth - prefixWidth - postfixWidth;
+
+	int p0, p1, p2, p3;
+#endif
+
+	for (int height = 0; height < (int) dstHeight; height++)
+	{
+#if ENABLE_MSA
+		unsigned char * pLocalDst = (unsigned char *) pDstImage;
+		unsigned char * pLocalSrc = (unsigned char *) pSrcImage;
+
+		for (int x = 0; x < prefixWidth; x++, pLocalSrc++, pLocalDst++)
+		{
+			*pLocalDst = pLut[*pLocalSrc];
+		}
+		for (int x = 0; x < (alignedWidth >> 4); x++)
+		{
+			pixels1 = __builtin_msa_ld_w((void *) pLocalSrc, 0);
+
+			p0 = __builtin_msa_copy_s_w(pixels1, 0);
+			p1 = __builtin_msa_copy_s_w(pixels1, 1);
+			p2 = __builtin_msa_copy_s_w(pixels1, 2);
+			p3 = __builtin_msa_copy_s_w(pixels1, 3);
+
+			p0 = pLut[p0 & 0xff] | (pLut[(p0 >> 8) & 0xFF] << 8) | (pLut[(p0 >> 16) & 0xFF] << 16) | (pLut[(p0 >> 24) & 0xFF] << 24);
+			p1 = pLut[p1 & 0xff] | (pLut[(p1 >> 8) & 0xFF] << 8) | (pLut[(p1 >> 16) & 0xFF] << 16) | (pLut[(p1 >> 24) & 0xFF] << 24);
+			p2 = pLut[p2 & 0xff] | (pLut[(p2 >> 8) & 0xFF] << 8) | (pLut[(p2 >> 16) & 0xFF] << 16) | (pLut[(p2 >> 24) & 0xFF] << 24);
+			p3 = pLut[p3 & 0xff] | (pLut[(p3 >> 8) & 0xFF] << 8) | (pLut[(p3 >> 16) & 0xFF] << 16) | (pLut[(p3 >> 24) & 0xFF] << 24);
+
+			((uint32_t *) &pixels2)[0] = p0;
+			((uint32_t *) &pixels2)[1] = p1;
+			((uint32_t *) &pixels2)[2] = p2;
+			((uint32_t *) &pixels2)[3] = p3;
+
+			__builtin_msa_st_w(pixels2, (void *) pLocalDst, 0);
+
+			pLocalSrc += 16;
+			pLocalDst += 16;
+		}
+		for (int x = 0; x < postfixWidth; x++, pLocalSrc++, pLocalDst++)
+		{
+			*pLocalDst = pLut[*pLocalSrc];
+		}
+#else // C
+		unsigned char * pLocalDst = (unsigned char *) pDstImage;
+		unsigned char * pLocalSrc = (unsigned char *) pSrcImage;
+
+		for (int x = 0; x < dstWidth; x++, pLocalSrc++, pLocalDst++)
+		{
+			*pLocalDst = pLut[*pLocalSrc];
+		}
+#endif
+		pSrcImage += srcImageStrideInBytes;
+		pDstImage += dstImageStrideInBytes;
+	}
+
+	return AGO_SUCCESS;
+}
